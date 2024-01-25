@@ -95,7 +95,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         self.filter_by_attribute = filter_by_attribute
 
         self.obs_group_to_keys = obs_group_to_keys # obs group -> obs keys
-        self.obs_keys = tuple([key for keys in self.obs_group_to_keys.values() for key in keys]) # obs keys for all obs groups (union)
+        self.obs_keys = tuple(set([key for keys in self.obs_group_to_keys.values() for key in keys])) # obs keys for all obs groups (union)
         self.dataset_keys = tuple(dataset_keys) # obs keys for dataset
 
         self.n_frame_stack = frame_stack
@@ -423,21 +423,18 @@ class MIMO_Dataset(torch.utils.data.Dataset):
             seq_index=seq_index
         )
 
-        for obs_group in self.obs_group_to_keys:
-            if obs_group != "goal": # goal obs_group requires special handling below
-                meta[obs_group] = self.get_obs_sequence_from_demo(
-                    demo_id,
-                    keys=self.obs_group_to_keys[obs_group],
-                    seq_index=seq_index,
-                )
+        meta["obs"] = self.get_obs_sequence_from_demo(
+            demo_id,
+            keys=self.obs_group_to_keys["obs"],
+            seq_index=seq_index,
+        )
 
-        # handle goal obs_group
-        # if "goal" in self.obs_group_to_keys and self.goal_mode in ["last", "subgoal"]:
-        #     meta["goal"] = self.get_goal_from_demo(
-        #         demo_id=demo_id,
-        #         keys=self.obs_group_to_keys["goal"],
-        #         seq_index=seq_index
-        #     )
+        if "goal" in self.obs_group_to_keys and self.goal_mode in ["last", "subgoal"]:
+            meta["goal"] = self.get_goal_sequence_from_demo(
+                demo_id=demo_id,
+                keys=self.obs_group_to_keys["goal"],
+                seq_index=seq_index
+            )
 
         return meta
     
@@ -494,6 +491,10 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         seq = dict()
         for k in keys:
             data = self.get_dataset_for_ep(demo_id, k)
+            if ObsUtils.has_modality(modality="rgb", obs_keys=[k.split('/')[-1]]):
+                if data.shape[-1] == 3:
+                    # (L, H, W, C) -> (L, C, H, W)
+                    data = np.transpose(data, (0, 3, 1, 2))
             seq[k] = data[seq_begin_index: seq_end_index]
 
         seq = TensorUtils.pad_sequence(seq, padding=(seq_begin_pad, seq_end_pad), pad_same=True)
@@ -545,7 +546,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
             data["pad_mask"] = pad_mask
         return data
     
-    def get_goal_from_demo(self, demo_id, keys, seq_index):
+    def get_goal_sequence_from_demo(self, demo_id, keys, seq_index):
         """
         Extract a (sub)sequence of goal observation items from a demo given the @keys of the items.
 
@@ -573,15 +574,23 @@ class MIMO_Dataset(torch.utils.data.Dataset):
 
         # fetch observation from the dataset file
         seq = dict()
-        for k in keys:
+        for k in tuple('{}/{}'.format("obs", k) for k in keys):
             data = self.get_dataset_for_ep(demo_id, k)
+            if ObsUtils.has_modality(modality="rgb", obs_keys=[k.split('/')[-1]]):
+                if data.shape[-1] == 3:
+                    # (L, H, W, C) -> (L, C, H, W)
+                    data = np.transpose(data, (0, 3, 1, 2))
             seq[k] = data[goal_index[seq_begin_index: seq_end_index]]
 
         seq = TensorUtils.pad_sequence(seq, padding=(seq_begin_pad, seq_end_pad), pad_same=True)
         pad_mask = np.array([0] * seq_begin_pad + [1] * (seq_end_index - seq_begin_index) + [0] * seq_end_pad)
         pad_mask = pad_mask[:, None].astype(bool)
 
-        return seq, pad_mask
+        seq = {k.split('/')[1]: seq[k] for k in seq}
+        if self.get_pad_mask:
+            seq["pad_mask"] = pad_mask
+
+        return seq
 
     def get_dataset_sampler(self):
         """
