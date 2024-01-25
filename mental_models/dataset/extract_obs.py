@@ -2,7 +2,7 @@
 Script to extract observations from low-dimensional simulation states in a directory robosuite datasets.
 
 Args:
-    data_dir (str): directory of input hdf5 datasets
+    data_dir (str): directory of hdf5 datasets
 
     n (int): if provided, stop after n trajectories are processed
 
@@ -25,24 +25,23 @@ Args:
 Example usage:
     
     # extract low-dimensional observations
-    python extract_obs.py --data_dir /path/to/demos --output_name low_dim.hdf5 --done_mode 2
+    python extract_obs.py --data_dir /path/to/datasets --done_mode 2
     
     # extract 84x84 image observations
-    python extract_obs.py --data_dir /path/to/demos --output_name image.hdf5 \
+    python extract_obs.py --data_dir /path/to/datasets \
         --done_mode 2 --camera_names agentview robot0_eye_in_hand --camera_height 84 --camera_width 84
 
     # extract 84x84 image and depth observations
-    python extract_obs.py --data_dir /path/to/demos --output_name depth.hdf5 \
+    python extract_obs.py --data_dir /path/to/datasets \
         --done_mode 2 --camera_names agentview robot0_eye_in_hand --camera_height 84 --camera_width 84 --depth
 
-    # (space saving option) extract 84x84 image observations with compression and without 
-    # extracting next obs (not needed for pure imitation learning algos)
-    python extract_obs.py --data_dir /path/to/demos --output_name image.hdf5 \
+    # (space saving option) extract 84x84 image observations with compression
+    python extract_obs.py --data_dir /path/to/datasets \
         --done_mode 2 --camera_names agentview robot0_eye_in_hand --camera_height 84 --camera_width 84 \
-        --compress --exclude-next-obs
+        --compress
 
     # use dense rewards, and only annotate the end of trajectories with done signal
-    python extract_obs.py --data_dir /path/to/demos --output_name image_dense_done_1.hdf5 \
+    python extract_obs.py --data_dir /path/to/datasets \
         --done_mode 1 --dense --camera_names agentview robot0_eye_in_hand --camera_height 84 --camera_width 84
 """
 import os
@@ -102,24 +101,26 @@ def extract_trajectory(
 
     traj = dict(
         obs=[], 
-        next_obs=[], 
         rewards=[], 
         dones=[], 
         actions=np.array(actions), 
-        states=np.array(states), 
+        states=np.array(states),
         initial_state_dict=initial_state,
     )
     traj_len = states.shape[0]
     # iteration variable @t is over "next obs" indices
     for t in range(1, traj_len + 1):
 
+        # collect observation
+        traj["obs"].append(obs)
+
         # get next observation
         if t == traj_len:
             # play final action to get next observation for last timestep
-            next_obs, _, _, _ = env.step(actions[t - 1])
+            obs, _, _, _ = env.step(actions[t - 1])
         else:
             # reset to simulator state to get observation
-            next_obs = env.reset_to({"states" : states[t]})
+            obs = env.reset_to({"states" : states[t]})
 
         # infer reward signal
         # note: our tasks use reward r(s'), reward AFTER transition, so this is
@@ -137,17 +138,14 @@ def extract_trajectory(
         done = int(done)
 
         # collect transition
-        traj["obs"].append(obs)
-        traj["next_obs"].append(next_obs)
         traj["rewards"].append(r)
         traj["dones"].append(done)
 
-        # update for next iter
-        obs = deepcopy(next_obs)
+    # save the goal observation at end of trajectory | the obs group will have one extra key
+    traj["obs"].append(obs)
 
     # convert list of dict to dict of list for obs dictionaries (for convenient writes to hdf5 dataset)
     traj["obs"] = TensorUtils.list_of_flat_dict_to_dict_of_list(traj["obs"])
-    traj["next_obs"] = TensorUtils.list_of_flat_dict_to_dict_of_list(traj["next_obs"])
 
     # list to numpy array
     for k in traj:
@@ -286,11 +284,6 @@ def dataset_states_to_obs(args):
                 ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]), compression="gzip")
             else:
                 ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
-            if not args.exclude_next_obs:
-                if args.compress:
-                    ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]), compression="gzip")
-                else:
-                    ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]))
 
         # episode metadata
         if is_robosuite_env:
@@ -323,7 +316,7 @@ if __name__ == "__main__":
         "--data_dir",
         type=str,
         required=True,
-        help="directory of input hdf5 datasets",
+        help="directory of hdf5 datasets",
     )
 
     # specify number of demos to process - useful for debugging conversion with a handful
@@ -398,13 +391,6 @@ if __name__ == "__main__":
         help="(optional) copy dones from source file instead of inferring them",
     )
 
-    # flag to exclude next obs in dataset
-    parser.add_argument(
-        "--exclude-next-obs", 
-        action='store_true',
-        help="(optional) exclude next obs in dataset",
-    )
-
     # flag to compress observations with gzip option in hdf5
     parser.add_argument(
         "--compress", 
@@ -419,10 +405,10 @@ if __name__ == "__main__":
             print(f"processing {filename}...")
             dataset_path = os.path.join(args.data_dir, filename)
             base, extension = os.path.splitext(filename)
-            output_path = os.path.join(args.data_dir,  f"{base}_obs{extension}")
+            output_path = os.path.join(args.data_dir, f"{base}_obs{extension}")
             args.dataset = dataset_path
             args.output_path = output_path
-            # gen obs
+            # generate observations
             dataset_states_to_obs(args)
             # clean up files
             os.remove(dataset_path)
