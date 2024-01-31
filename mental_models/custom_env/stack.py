@@ -1,4 +1,4 @@
-from mental_models.custom_env.utils import *
+import mental_models.utils.robosuite_env_utils as RobosuiteEnvUtils
 import numpy as np
 import argparse
 import json
@@ -16,30 +16,30 @@ def collect_demos(env, demos, render=True):
         env.reset()
         obs = env._get_observations(force_update=True)
         # navigate over small block and close gripper
-        target_state = get_current_state(obs=obs)
+        target_state = RobosuiteEnvUtils.get_current_state(obs=obs)
         target_state[0] = obs["cubeA_pos"]
         target_state[0][2] += 0.05
-        obs, _ = linear_action(env=env, target_state=target_state, gripper_cmd=GRIPPER_CLOSED, thresh=0.025, max_steps=100, render=render)
+        obs, _ = RobosuiteEnvUtils.linear_action(env=env, target_state=target_state, gripper_cmd=RobosuiteEnvUtils.GRIPPER_CLOSED, thresh=0.025, max_steps=100, render=render)
         # open gripper
-        obs = gripper_action(env=env, grasp=False, render=render)
+        obs = RobosuiteEnvUtils.gripper_action(env=env, grasp=False, render=render)
         # grasp
-        target_state = get_current_state(obs=obs)
+        target_state = RobosuiteEnvUtils.get_current_state(obs=obs)
         target_state[0][2] -= 0.075
-        obs, _ = linear_action(env=env, target_state=target_state, gripper_cmd=GRIPPER_OPEN, thresh=0.025, max_steps=100, render=render)
-        obs = gripper_action(env=env, grasp=True, render=render)
+        obs, _ = RobosuiteEnvUtils.linear_action(env=env, target_state=target_state, gripper_cmd=RobosuiteEnvUtils.GRIPPER_OPEN, thresh=0.025, max_steps=100, render=render)
+        obs = RobosuiteEnvUtils.gripper_action(env=env, grasp=True, render=render)
         # lift up 
-        target_state = get_current_state(obs=obs)
+        target_state = RobosuiteEnvUtils.get_current_state(obs=obs)
         target_state[0][2] += 0.1
-        obs, _ = linear_action(env=env, target_state=target_state, gripper_cmd=GRIPPER_CLOSED, thresh=0.025, max_steps=100, render=render)
+        obs, _ = RobosuiteEnvUtils.linear_action(env=env, target_state=target_state, gripper_cmd=RobosuiteEnvUtils.GRIPPER_CLOSED, thresh=0.025, max_steps=100, render=render)
         # navigate over big block
-        target_state = get_current_state(obs=obs)
+        target_state = RobosuiteEnvUtils.get_current_state(obs=obs)
         target_state[0] =  obs["cubeB_pos"]
         target_state[0][2] += 0.05
-        obs, _ = linear_action(env=env, target_state=target_state, gripper_cmd=GRIPPER_CLOSED, thresh=0.025, max_steps=100, render=render)
+        obs, _ = RobosuiteEnvUtils.linear_action(env=env, target_state=target_state, gripper_cmd=RobosuiteEnvUtils.GRIPPER_CLOSED, thresh=0.025, max_steps=100, render=render)
         # check if dropped
         # if np.linalg.norm(obs["gripper_to_cubeA"]) > 0.025:
         # drop 
-        gripper_action(env=env, grasp=False, render=render)
+        RobosuiteEnvUtils.gripper_action(env=env, grasp=False, render=render)
         if env._check_success():
             # success
             print(f"finished collecting demo {i}")
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     parser.add_argument("--render", action='store_true')
     args = parser.parse_args()
 
-    config, env = get_env(env_name="Stack", render=args.render)
+    config, env = RobosuiteEnvUtils.get_env(env_name="Stack", render=args.render)
     env_info = json.dumps(config)
     tmp_dir = "/tmp/{}".format(str(time.time()).replace(".", "_"))
     env = DataCollectionWrapper(env, tmp_dir)

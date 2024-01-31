@@ -14,38 +14,31 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.log_utils as LogUtils
 
-
 class MIMO_Dataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        hdf5_path,
         obs_group_to_keys,
         dataset_keys,
-        frame_stack=1,
+        frame_stack=0,
         seq_length=1,
         pad_frame_stack=True,
         pad_seq_length=True,
         get_pad_mask=False,
         goal_mode=None,
         num_subgoal=None,
-        hdf5_cache_mode=None,
-        hdf5_use_swmr=True,
-        hdf5_normalize_obs=False,
-        filter_by_attribute=None,
     ):
         """
-        Dataset class for fetching sequences of experience.
-        Length of the fetched sequence is equal to (@frame_stack - 1 + @seq_length)
+        Abstract class for fetching sequences of experience. Inherit from this class for 
+        different dataset formats. 
+        Length of the fetched sequence is equal to (@frame_stack + @seq_length)
 
         Args:
-            hdf5_path (str): path to hdf5.
-
             obs_group_to_keys (dict(iterable)): dictionary that maps observation group (obs, goal etc) to 
               observation keys (image, proprio, etc) to be fetched from the dataset
 
             dataset_keys (tuple, list): keys to dataset items (actions, rewards, etc) to be fetched from the dataset.
 
-            frame_stack (int): numbers of stacked frames to fetch. Defaults to 1 (single frame).
+            frame_stack (int): numbers of stacked frames to fetch. Defaults to 0 (single frame).
 
             seq_length (int): length of sequences to sample. Defaults to 1 (single frame).
 
@@ -65,6 +58,250 @@ class MIMO_Dataset(torch.utils.data.Dataset):
 
             num_subgoal (int): Required if goal_mode is "subgoal". Number of subgoals provided for each trajectory.
             Defaults to None, which indicates that every state is also a subgoal. Assume num_subgoal <= min length of traj.
+        """
+        self.obs_group_to_keys = obs_group_to_keys # obs group -> obs keys
+        self.obs_keys = tuple(set([key for keys in self.obs_group_to_keys.values() for key in keys])) # obs keys for all obs groups (union)
+        self.dataset_keys = tuple(dataset_keys) # obs keys for dataset
+
+        self.n_frame_stack = frame_stack
+        assert self.n_frame_stack >= 0
+        self.seq_length = seq_length
+        assert self.seq_length >= 1
+
+        self.pad_seq_length = pad_seq_length
+        self.pad_frame_stack = pad_frame_stack
+        self.get_pad_mask = get_pad_mask
+
+        self.goal_mode = goal_mode
+        self.num_subgoal = num_subgoal
+        if self.goal_mode is not None:
+            assert self.goal_mode in ["last", "subgoal"]
+
+        # init data structures 
+        self.total_num_sequences = 0
+        self._index_to_demo_id = dict()  # index in total_num_sequences -> demo_id
+        self._demo_id_to_start_index = dict()  # demo_id -> start index in total_num_sequences
+        self._demo_id_to_demo_length = dict() # demo_id -> length of demo in data
+
+        self.load_demo_info()
+
+    @property
+    def demos(self):
+        """
+        Get all demo ids
+        """
+        return NotImplementedError      
+
+    @property
+    def num_demos(self):
+        """
+        Get number of demos
+        """
+        return NotImplementedError      
+
+    def get_demo_len(self, demo_id):
+        """
+        Get length of demo with demo_id
+        """
+        return NotImplementedError
+
+    def load_demo_info(self):
+        """
+        Populate internal data structures
+        """
+        for demo_id in self.demos:
+            demo_length = self.get_demo_len(demo_id=demo_id)
+            self._demo_id_to_start_index[demo_id] = self.total_num_sequences
+            self._demo_id_to_demo_length[demo_id] = demo_length
+
+            num_sequences = demo_length
+            # determine actual number of sequences taking into account whether to pad for frame_stack and seq_length
+            if not self.pad_frame_stack:
+                num_sequences -= self.n_frame_stack
+            if not self.pad_seq_length:
+                num_sequences -= (self.seq_length - 1)
+
+            if self.pad_seq_length:
+                assert demo_length >= 1  # sequence needs to have at least one sample
+                num_sequences = max(num_sequences, 1)
+            else:
+                assert num_sequences >= 1  # assume demo_length >= (self.n_frame_stack + self.seq_length)
+
+            for _ in range(num_sequences):
+                self._index_to_demo_id[self.total_num_sequences] = demo_id
+                self.total_num_sequences += 1    
+
+    def __len__(self):
+        """
+        Ensure that the torch dataloader will do a complete pass through all sequences in 
+        the dataset before starting a new iteration.
+        """
+        return self.total_num_sequences
+    
+    def __getitem__(self, index):
+        """
+        Fetch dataset sequence @index (inferred through internal index map), using the getitem_cache if available.
+        """
+        return self.get_item(index)
+    
+    def __repr__(self):
+        """
+        Pretty print the class and important attributes on a call to `print`.
+        """
+        msg = "\tframe_stack={}\n\tseq_length={}\n"
+        msg += "\tpad_seq_length={}\n\tpad_frame_stack={}\n\tgoal_mode={}\n\tnum_subgoal={}\n"
+        msg += "\tnum_demos={}\n\tnum_sequences={}\n"
+        goal_mode_str = self.goal_mode if self.goal_mode is not None else "none"
+        num_subgoal_str = self.num_subgoal if self.num_subgoal is not None else "none"
+        msg = msg.format(self.n_frame_stack, self.seq_length,
+                         self.pad_seq_length, self.pad_frame_stack, goal_mode_str, num_subgoal_str,
+                         self.num_demos, self.total_num_sequences)
+        return msg
+    
+    def get_item(self, index):
+        """
+        Main implementation of getitem.
+        """
+        demo_id = self._index_to_demo_id[index]
+        # convert index in total_num_sequences to index in data
+        start_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
+        demo_index = index - self._demo_id_to_start_index[demo_id] + start_offset
+
+        data_seq_index, pad_mask = self.get_data_seq_index(demo_id=demo_id, index_in_demo=demo_index)
+        meta = self.get_data_seq(demo_id=demo_id, keys=self.dataset_keys, seq_index=data_seq_index)
+        meta["obs"] = self.get_obs_seq(demo_id=demo_id, keys=self.obs_group_to_keys["obs"], seq_index=data_seq_index)
+        if "goal" in self.obs_group_to_keys and self.goal_mode in ["last", "subgoal"]:
+            goal_index = self.get_goal_seq_index(demo_id=demo_id, data_seq_index=data_seq_index)
+            meta["goal"] = self.get_obs_seq(demo_id=demo_id, keys=self.obs_group_to_keys["goal"], seq_index=goal_index)
+        if self.get_pad_mask:
+            meta["pad_mask"] = pad_mask
+
+        return meta
+    
+    def get_data_seq(self, demo_id, keys, seq_index):
+        """
+        Extract a (sub)sequence of data items from a demo given the @keys of the items.
+
+        Args:
+            demo_id (str): id of the demo, e.g., demo_0
+            keys (tuple): list of keys to extract
+            seq_index (list): sequence indices
+
+        Returns:
+            a dictionary of extracted items.
+        """
+        return NotImplementedError
+    
+    def get_obs_seq(self, demo_id, keys, seq_index):
+        """
+        Extract a (sub)sequence of observation items from a demo given the @keys of the items.
+
+        Args:
+            demo_id (str): id of the demo, e.g., demo_0
+            keys (tuple): list of keys to extract
+            seq_index (list): sequence indices
+
+        Returns:
+            a dictionary of extracted items.
+        """
+        return NotImplementedError
+
+    def get_data_seq_index(self, demo_id, index_in_demo):
+        """
+        Get sequence indices and pad mask to extract data from a demo. 
+
+        Args:
+            demo_id (key): id of the demo.
+            index_in_demo (int): beginning index of the sequence wrt the demo.
+
+        Returns:
+            data sequence indices and pad mask.
+        """
+        demo_length = self._demo_id_to_demo_length[demo_id]
+        assert index_in_demo < demo_length
+
+        # determine begin and end of sequence
+        seq_begin_index = max(0, index_in_demo - self.n_frame_stack)
+        seq_end_index = min(demo_length, index_in_demo + self.seq_length)
+        seq_index = np.arange(seq_begin_index, seq_end_index, dtype=np.int32)
+
+        # determine sequence padding
+        seq_begin_pad = max(0, self.n_frame_stack - index_in_demo)  # pad for frame stacking
+        seq_end_pad = max(0, index_in_demo + self.seq_length - demo_length)  # pad for sequence length
+
+        # make sure we are not padding if specified.
+        if not self.pad_frame_stack:
+            assert seq_begin_pad == 0
+        if not self.pad_seq_length:
+            assert seq_end_pad == 0
+
+        seq_index = TensorUtils.pad_sequence(seq_index, padding=(seq_begin_pad, seq_end_pad))
+        pad_mask = np.array([0] * seq_begin_pad + [1] * (seq_end_index - seq_begin_index) + [0] * seq_end_pad)
+        pad_mask = pad_mask[:, None].astype(bool)
+            
+        return seq_index, pad_mask 
+    
+    def get_goal_seq_index(self, demo_id, data_seq_index):
+        """
+        Get sequence indices to extract goals from a demo. 
+
+        Args:
+            demo_id (key): id of the demo.
+            data_seq_index (list): sequence indices.
+
+        Returns:
+            goal sequence indices.
+        """
+        demo_length = self._demo_id_to_demo_length[demo_id]
+        goal_index = None
+        if self.goal_mode == "last":
+            goal_index = np.full((demo_length), -1) # every goal is the last state
+        elif self.goal_mode == "subgoal" and self.num_subgoal is None:
+            goal_index = np.arange(1, demo_length+1) # goal is the next state
+        elif self.goal_mode == "subgoal":
+            # create evenly spaced subgoals
+            subgoal_index = np.linspace(0, demo_length, self.num_subgoal+1, dtype=int)
+            repeat = np.diff(subgoal_index)
+            goal_index = np.array([index for i, index in enumerate(subgoal_index[1:]) for _ in range(repeat[i])])
+
+        goal_index = goal_index[data_seq_index]
+
+        return goal_index
+
+    def get_dataset_sampler(self):
+        """
+        Return instance of torch.utils.data.Sampler or None. Allows
+        for dataset to define custom sampling logic, such as
+        re-weighting the probability of samples being drawn.
+        See the `train` function in scripts/train.py, and torch
+        `DataLoader` documentation, for more info.
+        """
+        return None
+    
+
+class RobomimicDataset(MIMO_Dataset):
+    def __init__(
+        self,
+        hdf5_path,
+        obs_group_to_keys,
+        dataset_keys,
+        frame_stack=0,
+        seq_length=1,
+        pad_frame_stack=True,
+        pad_seq_length=True,
+        get_pad_mask=False,
+        goal_mode=None,
+        num_subgoal=None,
+        hdf5_cache_mode=None,
+        hdf5_use_swmr=True,
+        hdf5_normalize_obs=False,
+        filter_by_attribute=None,
+    ):
+        """
+        MIMO_Dataset subclass for fetching sequences of experience from HDF5 dataset.
+
+        Args:
+            hdf5_path (str): path to hdf5.
 
             hdf5_cache_mode (str): one of ["all", "low_dim", or None]. Set to "all" to cache entire hdf5 
                 in memory - this is by far the fastest for data loading. Set to "low_dim" to cache all 
@@ -82,39 +319,26 @@ class MIMO_Dataset(torch.utils.data.Dataset):
             filter_by_attribute (str): if provided, use the provided filter key to look up a subset of
                 demonstrations to load
         """
-        super(MIMO_Dataset, self).__init__()
-
         self.hdf5_path = os.path.expanduser(hdf5_path)
         self.hdf5_use_swmr = hdf5_use_swmr
         self.hdf5_normalize_obs = hdf5_normalize_obs
         self._hdf5_file = None
-
         assert hdf5_cache_mode in ["all", "low_dim", None]
         self.hdf5_cache_mode = hdf5_cache_mode
-
         self.filter_by_attribute = filter_by_attribute
 
-        self.obs_group_to_keys = obs_group_to_keys # obs group -> obs keys
-        self.obs_keys = tuple(set([key for keys in self.obs_group_to_keys.values() for key in keys])) # obs keys for all obs groups (union)
-        self.dataset_keys = tuple(dataset_keys) # obs keys for dataset
-
-        self.n_frame_stack = frame_stack
-        assert self.n_frame_stack >= 1
-
-        self.seq_length = seq_length
-        assert self.seq_length >= 1
-
-        self.goal_mode = goal_mode
-        self.num_subgoal = num_subgoal
-        if self.goal_mode is not None:
-            assert self.goal_mode in ["last", "subgoal"]
-
-        self.pad_seq_length = pad_seq_length
-        self.pad_frame_stack = pad_frame_stack
-        self.get_pad_mask = get_pad_mask
-
-        self.load_demo_info(filter_by_attribute=self.filter_by_attribute)
-
+        super(RobomimicDataset, self).__init__(
+            obs_group_to_keys=obs_group_to_keys,
+            dataset_keys=dataset_keys,
+            frame_stack=frame_stack,
+            seq_length=seq_length, 
+            pad_frame_stack=pad_frame_stack, 
+            pad_seq_length=pad_seq_length, 
+            get_pad_mask=get_pad_mask, 
+            goal_mode=goal_mode, 
+            num_subgoal=num_subgoal
+            )
+        
         # maybe prepare for observation normalization
         self.obs_normalization_stats = None
         if self.hdf5_normalize_obs:
@@ -141,7 +365,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
             if self.hdf5_cache_mode == "all":
                 # cache getitem calls for even more speedup. We don't do this for
                 # "low-dim" since image observations require calls to getitem anyways.
-                print("MIMO_Dataset: caching get_item calls...")
+                print("RobomimicDataset: caching get_item calls...")
                 self.getitem_cache = [self.get_item(i) for i in LogUtils.custom_tqdm(range(len(self)))]
 
                 # don't need the previous cache anymore
@@ -152,58 +376,34 @@ class MIMO_Dataset(torch.utils.data.Dataset):
 
         self.close_and_delete_hdf5_handle()
 
-    def load_demo_info(self, filter_by_attribute=None, demos=None):
+    @property
+    def demos(self):
         """
-        Args:
-            filter_by_attribute (str): if provided, use the provided filter key
-                to select a subset of demonstration trajectories to load
-
-            demos (list): list of demonstration keys to load from the hdf5 file. If 
-                omitted, all demos in the file (or under the @filter_by_attribute 
-                filter key) are used.
+        Get all demo ids
         """
+        demos = []
         # filter demo trajectory by mask
-        if demos is not None:
-            self.demos = demos
-        elif filter_by_attribute is not None:
-            self.demos = [elem.decode("utf-8") for elem in np.array(self.hdf5_file["mask/{}".format(filter_by_attribute)][:])]
+        if self.filter_by_attribute is not None:
+            demos = [elem.decode("utf-8") for elem in np.array(self.hdf5_file["mask/{}".format(self.filter_by_attribute)][:])]
         else:
-            self.demos = list(self.hdf5_file["data"].keys())
-
+            demos = list(self.hdf5_file["data"].keys())
         # sort demo keys
-        inds = np.argsort([int(elem[5:]) for elem in self.demos])
-        self.demos = [self.demos[i] for i in inds]
+        inds = np.argsort([int(elem[5:]) for elem in demos])
+        demos = [demos[i] for i in inds]
+        return demos
 
-        self.n_demos = len(self.demos)
+    @property
+    def num_demos(self):
+        """
+        Get number of demos
+        """
+        return len(self.demos)   
 
-        # keep internal index maps to know which transitions belong to which demos
-        self._index_to_demo_id = dict()  # index in total_num_sequences -> demo_id
-        self._demo_id_to_start_index = dict()  # demo_id -> start index in total_num_sequences
-        self._demo_id_to_demo_length = dict() # demo_id -> length of demo in data
-
-        # determine index mapping
-        self.total_num_sequences = 0
-        for ep in self.demos:
-            demo_length = self.hdf5_file["data/{}".format(ep)].attrs["num_samples"]
-            self._demo_id_to_start_index[ep] = self.total_num_sequences
-            self._demo_id_to_demo_length[ep] = demo_length
-
-            num_sequences = demo_length
-            # determine actual number of sequences taking into account whether to pad for frame_stack and seq_length
-            if not self.pad_frame_stack:
-                num_sequences -= (self.n_frame_stack - 1)
-            if not self.pad_seq_length:
-                num_sequences -= (self.seq_length - 1)
-
-            if self.pad_seq_length:
-                assert demo_length >= 1  # sequence needs to have at least one sample
-                num_sequences = max(num_sequences, 1)
-            else:
-                assert num_sequences >= 1  # assume demo_length >= (self.n_frame_stack - 1 + self.seq_length)
-
-            for _ in range(num_sequences):
-                self._index_to_demo_id[self.total_num_sequences] = ep
-                self.total_num_sequences += 1
+    def get_demo_len(self, demo_id):
+        """
+        Get length of demo with demo_id
+        """
+        return self.hdf5_file["data/{}".format(demo_id)].attrs["num_samples"] 
 
     @property
     def hdf5_file(self):
@@ -212,8 +412,8 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         """
         if self._hdf5_file is None:
             self._hdf5_file = h5py.File(self.hdf5_path, 'r', swmr=self.hdf5_use_swmr, libver='latest')
-        return self._hdf5_file
-
+        return self._hdf5_file  
+    
     def close_and_delete_hdf5_handle(self):
         """
         Maybe close the file handle.
@@ -221,7 +421,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         if self._hdf5_file is not None:
             self._hdf5_file.close()
         self._hdf5_file = None
-
+    
     @contextmanager
     def hdf5_file_opened(self):
         """
@@ -232,7 +432,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         yield self.hdf5_file
         if should_close:
             self.close_and_delete_hdf5_handle()
-
+    
     def __del__(self):
         self.close_and_delete_hdf5_handle()
 
@@ -241,25 +441,11 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         Pretty print the class and important attributes on a call to `print`.
         """
         msg = str(self.__class__.__name__)
-        msg += " (\n\tpath={}\n\obs_group_to_keys={}\n\tobs_keys={}\n\tseq_length={}\n\tfilter_key={}\n\tframe_stack={}\n"
-        msg += "\tpad_seq_length={}\n\tpad_frame_stack={}\n\tgoal_mode={}\n\tnum_subgoal={}\n"
-        msg += "\tcache_mode={}\n"
-        msg += "\tnum_demos={}\n\tnum_sequences={}\n)"
+        msg += " (\n\tpath={}\n\tobs_group_to_keys={}\n\tobs_keys={}\n\tfilter_key={}\n\tcache_mode={}\n"
         filter_key_str = self.filter_by_attribute if self.filter_by_attribute is not None else "none"
-        goal_mode_str = self.goal_mode if self.goal_mode is not None else "none"
-        num_subgoal_str = self.num_subgoal if self.num_subgoal is not None else "none"
         cache_mode_str = self.hdf5_cache_mode if self.hdf5_cache_mode is not None else "none"
-        msg = msg.format(self.hdf5_path, self.obs_group_to_keys, self.obs_keys, self.seq_length, filter_key_str, self.n_frame_stack,
-                         self.pad_seq_length, self.pad_frame_stack, goal_mode_str, num_subgoal_str, cache_mode_str,
-                         self.n_demos, self.total_num_sequences)
-        return msg
-
-    def __len__(self):
-        """
-        Ensure that the torch dataloader will do a complete pass through all sequences in 
-        the dataset before starting a new iteration.
-        """
-        return self.total_num_sequences
+        msg = msg.format(self.hdf5_path, self.obs_group_to_keys, self.obs_keys, filter_key_str, cache_mode_str)
+        return msg + super(RobomimicDataset, self).__repr__() + ")"
 
     def load_dataset_in_memory(self, demo_list, hdf5_file, obs_keys, dataset_keys):
         """
@@ -277,7 +463,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
             all_data (dict): dictionary of loaded data.
         """
         all_data = dict()
-        print("MIMO_Dataset: loading dataset into memory...")
+        print("RobomimicDataset: loading dataset into memory...")
         for ep in LogUtils.custom_tqdm(demo_list):
             all_data[ep] = {}
             all_data[ep]["attrs"] = {}
@@ -295,7 +481,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
                 all_data[ep]["attrs"]["model_file"] = hdf5_file["data/{}".format(ep)].attrs["model_file"]
 
         return all_data
-
+    
     def normalize_obs(self):
         """
         Computes a dataset-wide mean and standard deviation for the observations 
@@ -335,7 +521,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
         obs_traj = ObsUtils.process_obs_dict(obs_traj)
         merged_stats = _compute_traj_stats(obs_traj)
-        print("MIMO_Dataset: normalizing observations...")
+        print("RobomimicDataset: normalizing observations...")
         for ep in LogUtils.custom_tqdm(self.demos[1:]):
             obs_traj = {k: self.hdf5_file["data/{}/obs/{}".format(ep, k)][()].astype('float32') for k in self.obs_keys}
             obs_traj = ObsUtils.process_obs_dict(obs_traj)
@@ -348,7 +534,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
             obs_normalization_stats[k]["mean"] = merged_stats[k]["mean"].astype(np.float32)
             obs_normalization_stats[k]["std"] = (np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3).astype(np.float32)
         return obs_normalization_stats
-
+    
     def get_obs_normalization_stats(self):
         """
         Returns dictionary of mean and std for each observation key if using
@@ -399,94 +585,20 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         """
         if self.hdf5_cache_mode == "all":
             return self.getitem_cache[index]
-        return self.get_item(index)
-
-    def get_item(self, index):
-        """
-        Main implementation of getitem when not using cache.
-        """
-        demo_id = self._index_to_demo_id[index]
-        # convert index in total_num_sequences to index in data
-        start_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
-        demo_index = index - self._demo_id_to_start_index[demo_id] + start_offset
-
-        seq_index = self.get_seq_index(
-            demo_id=demo_id, 
-            index_in_demo=demo_index, 
-            num_frames_to_stack=self.n_frame_stack - 1,
-            seq_length=self.seq_length
-        )
-
-        meta = self.get_dataset_sequence_from_demo(
-            demo_id,
-            keys=self.dataset_keys,
-            seq_index=seq_index
-        )
-
-        meta["obs"] = self.get_obs_sequence_from_demo(
-            demo_id,
-            keys=self.obs_group_to_keys["obs"],
-            seq_index=seq_index,
-        )
-
-        if "goal" in self.obs_group_to_keys and self.goal_mode in ["last", "subgoal"]:
-            meta["goal"] = self.get_goal_sequence_from_demo(
-                demo_id=demo_id,
-                keys=self.obs_group_to_keys["goal"],
-                seq_index=seq_index
-            )
-
-        return meta
+        return super(RobomimicDataset, self).__getitem__(index=index)
     
-    def get_seq_index(self, demo_id, index_in_demo, num_frames_to_stack=0, seq_length=1):
-        """
-        Get sequence indices and padding to extract data from a demo. 
-
-        Args:
-            demo_id (str): id of the demo, e.g., demo_0
-            index_in_demo (int): beginning index of the sequence wrt the demo
-            num_frames_to_stack (int): numbers of frame to stack. Seq gets prepended with repeated items if out of range
-            seq_length (int): sequence length to extract. Seq gets post-pended with repeated items if out of range
-
-        Returns:
-            sequence indices and padding.
-        """
-        assert num_frames_to_stack >= 0
-        assert seq_length >= 1
-
-        demo_length = self._demo_id_to_demo_length[demo_id]
-        assert index_in_demo < demo_length
-
-        # determine begin and end of sequence
-        seq_begin_index = max(0, index_in_demo - num_frames_to_stack)
-        seq_end_index = min(demo_length, index_in_demo + seq_length)
-
-        # determine sequence padding
-        seq_begin_pad = max(0, num_frames_to_stack - index_in_demo)  # pad for frame stacking
-        seq_end_pad = max(0, index_in_demo + seq_length - demo_length)  # pad for sequence length
-
-        # make sure we are not padding if specified.
-        if not self.pad_frame_stack:
-            assert seq_begin_pad == 0
-        if not self.pad_seq_length:
-            assert seq_end_pad == 0
-            
-        return (seq_begin_index, seq_end_index, seq_begin_pad, seq_end_pad)
-
-    def get_sequence_from_demo(self, demo_id, keys, seq_index):
+    def get_data_seq(self, demo_id, keys, seq_index):
         """
         Extract a (sub)sequence of data items from a demo given the @keys of the items.
 
         Args:
             demo_id (str): id of the demo, e.g., demo_0
             keys (tuple): list of keys to extract
-            seq_index (tuple): sequence indices and padding
+            seq_index (tuple): sequence indices
 
         Returns:
             a dictionary of extracted items.
         """
-        seq_begin_index, seq_end_index, seq_begin_pad, seq_end_pad = seq_index
-        
         # fetch observation from the dataset file
         seq = dict()
         for k in keys:
@@ -495,109 +607,26 @@ class MIMO_Dataset(torch.utils.data.Dataset):
                 if data.shape[-1] == 3:
                     # (L, H, W, C) -> (L, C, H, W)
                     data = np.transpose(data, (0, 3, 1, 2))
-            seq[k] = data[seq_begin_index: seq_end_index]
+            seq[k] = data[seq_index]
 
-        seq = TensorUtils.pad_sequence(seq, padding=(seq_begin_pad, seq_end_pad), pad_same=True)
-        pad_mask = np.array([0] * seq_begin_pad + [1] * (seq_end_index - seq_begin_index) + [0] * seq_end_pad)
-        pad_mask = pad_mask[:, None].astype(bool)
-
-        return seq, pad_mask
+        return seq
     
-    def get_obs_sequence_from_demo(self, demo_id, keys, seq_index):
+    def get_obs_seq(self, demo_id, keys, seq_index):
         """
         Extract a (sub)sequence of observation items from a demo given the @keys of the items.
 
         Args:
             demo_id (str): id of the demo, e.g., demo_0
             keys (tuple): list of keys to extract
-            seq_index (tuple): sequence indices and padding
+            seq_index (tuple): sequence indices
 
         Returns:
             a dictionary of extracted items.
         """
-        obs, pad_mask = self.get_sequence_from_demo(
-            demo_id,
-            keys=tuple('{}/{}'.format("obs", k) for k in keys),
-            seq_index=seq_index,
-        )
-        obs = {k.split('/')[1]: obs[k] for k in obs}  # strip the prefix
-        if self.get_pad_mask:
-            obs["pad_mask"] = pad_mask
-        return obs
-    
-    def get_dataset_sequence_from_demo(self, demo_id, keys, seq_index):
-        """
-        Extract a (sub)sequence of dataset items from a demo given the @keys of the items (e.g., states, actions).
-        
-        Args:
-            demo_id (str): id of the demo, e.g., demo_0
-            keys (tuple): list of keys to extract
-            seq_index (tuple): sequence indices and padding
-
-        Returns:
-            a dictionary of extracted items.
-        """
-        data, pad_mask = self.get_sequence_from_demo(
-            demo_id,
-            keys=keys,
-            seq_index=seq_index,
-        )
-        if self.get_pad_mask:
-            data["pad_mask"] = pad_mask
-        return data
-    
-    def get_goal_sequence_from_demo(self, demo_id, keys, seq_index):
-        """
-        Extract a (sub)sequence of goal observation items from a demo given the @keys of the items.
-
-        Args:
-            demo_id (str): id of the demo, e.g., demo_0
-            keys (tuple): list of keys to extract
-            seq_index (tuple): sequence indices and padding
-
-        Returns:
-            a dictionary of extracted items.
-        """
-        demo_length = self._demo_id_to_demo_length[demo_id]
-        goal_index = None
-        if self.goal_mode == "last":
-            goal_index = np.full((demo_length), -1) # every goal is the last state
-        elif self.goal_mode == "subgoal" and self.num_subgoal is None:
-            goal_index = np.arange(1, demo_length+1) # goal is the next state
-        elif self.goal_mode == "subgoal":
-            # create evenly spaced subgoals
-            subgoal_index = np.linspace(0, demo_length, self.num_subgoal+1, dtype=int)
-            repeat = np.diff(subgoal_index)
-            goal_index = np.array([index for i, index in enumerate(subgoal_index[1:]) for _ in range(repeat[i])])
-
-        seq_begin_index, seq_end_index, seq_begin_pad, seq_end_pad = seq_index
-
-        # fetch observation from the dataset file
-        seq = dict()
-        for k in tuple('{}/{}'.format("obs", k) for k in keys):
-            data = self.get_dataset_for_ep(demo_id, k)
-            if ObsUtils.has_modality(modality="rgb", obs_keys=[k.split('/')[-1]]):
-                if data.shape[-1] == 3:
-                    # (L, H, W, C) -> (L, C, H, W)
-                    data = np.transpose(data, (0, 3, 1, 2))
-            seq[k] = data[goal_index[seq_begin_index: seq_end_index]]
-
-        seq = TensorUtils.pad_sequence(seq, padding=(seq_begin_pad, seq_end_pad), pad_same=True)
-        pad_mask = np.array([0] * seq_begin_pad + [1] * (seq_end_index - seq_begin_index) + [0] * seq_end_pad)
-        pad_mask = pad_mask[:, None].astype(bool)
-
-        seq = {k.split('/')[1]: seq[k] for k in seq}
-        if self.get_pad_mask:
-            seq["pad_mask"] = pad_mask
-
+        seq = self.get_data_seq(
+            demo_id=demo_id,
+            keys=['{}/{}'.format("obs", k) for k in keys], 
+            seq_index=seq_index
+            )
+        seq = {k.split('/')[1]: seq[k] for k in seq}  # strip the prefix
         return seq
-
-    def get_dataset_sampler(self):
-        """
-        Return instance of torch.utils.data.Sampler or None. Allows
-        for dataset to define custom sampling logic, such as
-        re-weighting the probability of samples being drawn.
-        See the `train` function in scripts/train.py, and torch
-        `DataLoader` documentation, for more info.
-        """
-        return None
