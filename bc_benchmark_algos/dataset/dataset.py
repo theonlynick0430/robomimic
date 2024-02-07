@@ -164,7 +164,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         """
         demo_id = self._index_to_demo_id[index]
         # convert index in total_num_sequences to index in data
-        start_offset = 0 if self.pad_frame_stack else (self.n_frame_stack - 1)
+        start_offset = 0 if self.pad_frame_stack else self.n_frame_stack
         demo_index = index - self._demo_id_to_start_index[demo_id] + start_offset
 
         data_seq_index, pad_mask = self.get_data_seq_index(demo_id=demo_id, index_in_demo=demo_index)

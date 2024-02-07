@@ -1,4 +1,4 @@
-import mental_models.utils.robosuite_env_utils as RobosuiteEnvUtils
+import bc_benchmark_algos.utils.robosuite_env_utils as RobosuiteEnvUtils
 import numpy as np
 import argparse
 import json

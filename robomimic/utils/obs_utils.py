@@ -44,6 +44,10 @@ OBS_MODALITY_CLASSES = {}
 OBS_ENCODER_CORES = {"None": None}          # Include default None
 OBS_RANDOMIZERS = {"None": None}            # Include default None
 
+# DO NOT MODIFY THIS
+# Nested dictionary that maps module to obs_group to obs_keys t0 shape
+# Ex: {"bc": {"obs": {"robot0_eef_pos": [3]}, "goal": {"agentview_image": [2, 84, 84]}}}
+OBS_SHAPES = OrderedDict()
 
 def register_obs_key(target_class):
     assert target_class not in OBS_MODALITY_CLASSES, f"Already registered modality {target_class}!"
@@ -93,15 +97,6 @@ def obs_encoder_kwargs_from_config(obs_encoder_config):
     # Unlock encoder config
     obs_encoder_config.unlock()
     for obs_modality, encoder_kwargs in obs_encoder_config.items():
-        # First run some sanity checks and store the classes
-        for cls_name, cores in zip(("core", "obs_randomizer"), (OBS_ENCODER_CORES, OBS_RANDOMIZERS)):
-            # Make sure the requested encoder for each obs_modality exists
-            cfg_cls = encoder_kwargs[f"{cls_name}_class"]
-            if cfg_cls is not None:
-                assert cfg_cls in cores, f"No {cls_name} class with name {cfg_cls} found, must register this class before" \
-                    f"creating model!"
-                # encoder_kwargs[f"{cls_name}_class"] = cores[cfg_cls]
-
         # Process core and randomizer kwargs
         encoder_kwargs.core_kwargs = dict() if encoder_kwargs.core_kwargs is None else \
             deepcopy(encoder_kwargs.core_kwargs)
@@ -134,61 +129,56 @@ def initialize_obs_modality_mapping_from_dict(modality_mapping):
         OBS_KEYS_TO_MODALITIES.update({k: mod for k in keys})
 
 
-def initialize_obs_utils_with_obs_specs(obs_modality_specs):
+def initialize_obs_utils_with_obs_specs(obs_modality_specs, obs_shape_spec):
     """
     This function should be called before using any observation key-specific
     functions in this file, in order to make sure that all utility
     functions are aware of the observation modalities (e.g. which ones
     are low-dimensional, which ones are rgb, etc.).
 
-    It constructs two dictionaries: (1) that map observation modality (e.g. low_dim, rgb) to
-    a list of observation keys under that modality, and (2) that maps the inverse, specific
-    observation keys to their corresponding observation modality.
-
-    Input should be a nested dictionary (or list of such dicts) with the following structure:
-
-        obs_variant (str):
-            obs_modality (str): observation keys (list)
-            ...
-        ...
-
-    Example:
-        {
-            "obs": {
-                "low_dim": ["robot0_eef_pos", "robot0_eef_quat"],
-                "rgb": ["agentview_image", "robot0_eye_in_hand"],
-            }
-            "goal": {
-                "low_dim": ["robot0_eef_pos"],
-                "rgb": ["agentview_image"]
-            }
-        }
-
-    In the example, raw observations consist of low-dim and rgb modalities, with
-    the robot end effector pose under low-dim, and the agentview and wrist camera
-    images under rgb, while goal observations also consist of low-dim and rgb modalities,
-    with a subset of the raw observation keys per modality.
+    It constructs three dictionaries: (1) that map observation modality (e.g. low_dim, rgb) to
+    a list of observation keys under that modality, (2) that maps the inverse, specific
+    observation keys to their corresponding observation modality, and (3) that maps module to
+    observation group to observation keys to shapes.
 
     Args:
-        obs_modality_specs (dict or list): A nested dictionary (see docstring above for an example)
-            or a list of nested dictionaries. Accepting a list as input makes it convenient for
+        obs_modality_specs (dict): A nested dictionary (see docstring below for an example).
+            Accepting multiple modality specs as input makes it convenient for
             situations where multiple modules may each have their own modality spec.
+        
+            Example: 
+            {
+                "bc": {
+                    "obs": {
+                        "low_dim": ["robot0_eef_pos", "robot0_eef_quat"],
+                        "rgb": ["agentview_image", "robot0_eye_in_hand"],
+                    }
+                    "goal": {
+                        "low_dim": ["robot0_eef_pos"],
+                        "rgb": ["agentview_image"]
+                    }
+                }
+            }
+        
+        obs_shape_spec (dict): A nested dictionary that maps observation keys to shape.
+
+            Example:
+            {
+                "robot0_eef_pos": [3],
+                "agentview_image": [3, 84, 84]
+            }
     """
     global OBS_KEYS_TO_MODALITIES, OBS_MODALITIES_TO_KEYS
 
     OBS_KEYS_TO_MODALITIES = ObservationKeyToModalityDict()
 
-    # accept one or more spec dictionaries - if it's just one, account for this
-    if isinstance(obs_modality_specs, dict):
-        obs_modality_spec_list = [obs_modality_specs]
-    else:
-        obs_modality_spec_list = obs_modality_specs
-
-    # iterates over observation specs
+    # iterates over modality specs
     obs_modality_mapping = {}
-    for obs_modality_spec in obs_modality_spec_list:
-        # iterates over observation variants (e.g. observations, goals, subgoals)
-        for obs_modalities in obs_modality_spec.values():
+    for module, obs_modality_spec in obs_modality_specs.items():
+        module_shapes = OrderedDict()
+        # iterates over observation groups (e.g. observations, goals, subgoals)
+        for obs_group, obs_modalities in obs_modality_spec.items():
+            obs_group_shapes = OrderedDict()
             for obs_modality, obs_keys in obs_modalities.items():
                 # add all keys for each obs modality to the corresponding list in obs_modality_mapping
                 if obs_modality not in obs_modality_mapping:
@@ -203,6 +193,14 @@ def initialize_obs_utils_with_obs_specs(obs_modality_specs):
                         assert OBS_KEYS_TO_MODALITIES[obs_key] == obs_modality, \
                             f"Cannot register obs key {obs_key} with modality {obs_modality}; " \
                             f"already exists with corresponding modality {OBS_KEYS_TO_MODALITIES[obs_key]}"
+                    # update shape map 
+                    assert obs_key in obs_shape_spec, \
+                    f"Obs key {obs_key} has no corresponding shape in config"
+                    obs_group_shapes[obs_key] = obs_shape_spec[obs_key]
+            if obs_group_shapes:
+                module_shapes[obs_group] = obs_group_shapes
+        if module_shapes:
+            OBS_SHAPES[module] = module_shapes
 
     # remove duplicate entries and store in global mapping
     OBS_MODALITIES_TO_KEYS = { obs_modality : list(set(obs_modality_mapping[obs_modality])) for obs_modality in obs_modality_mapping }
@@ -234,22 +232,22 @@ def initialize_obs_utils_with_config(config):
         config (BaseConfig instance): config object
     """
     if config.algo_name == "hbc":
-        obs_modality_specs = [
-            config.observation.planner.modalities, 
-            config.observation.actor.modalities,
-        ]
+        obs_modality_specs = {
+            "planner": config.observation.planner.modalities, 
+            "actor": config.observation.actor.modalities,
+        }
         obs_encoder_config = config.observation.actor.encoder
     elif config.algo_name == "iris":
-        obs_modality_specs = [
-            config.observation.value_planner.planner.modalities, 
-            config.observation.value_planner.value.modalities, 
-            config.observation.actor.modalities,
-        ]
+        obs_modality_specs = {
+            "planner": config.observation.value_planner.planner.modalities, 
+            "value": config.observation.value_planner.value.modalities, 
+            "actor": config.observation.actor.modalities,
+        }
         obs_encoder_config = config.observation.actor.encoder
     else:
-        obs_modality_specs = [config.observation.modalities]
+        obs_modality_specs = {config.algo_name: config.observation.modalities}
         obs_encoder_config = config.observation.encoder
-    initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_specs)
+    initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_specs, obs_shape_spec=config.observation.shapes)
     initialize_default_obs_encoder(obs_encoder_config=obs_encoder_config)
 
 
