@@ -8,7 +8,7 @@ import robomimic.utils.log_utils as LogUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
-from bc_benchmark_algos.dataset.dataset import RobomimicDataset
+from bc_benchmark_algos.dataset.robomimic import load_train_val_data
 from torch.utils.data import DataLoader
 import torch
 import numpy as np
@@ -17,6 +17,7 @@ import os
 import time
 import argparse
 import sys
+
 
 def train(args):
 
@@ -97,44 +98,12 @@ def train(args):
 
     #### DATASET ###
 
-    # make sure the dataset exists
-    dataset_path = os.path.expanduser(config.train.data)
-    if not os.path.exists(dataset_path):
-        raise Exception("Dataset at provided path {} not found!".format(dataset_path))
-
     assert config.train.dataset_type == "robomimic", "only robomimic datasets currently supported"
-    # config can contain an attribute to filter on
-    train_filter_by_attribute = config.train.hdf5_filter_key
-    valid_filter_by_attribute = config.train.hdf5_validation_filter_key
-    if valid_filter_by_attribute is not None:
-        assert config.experiment.validate, "specified validation filter key {}, but config.experiment.validate is not set".format(valid_filter_by_attribute)
-    # load the dataset into memory
-    if config.experiment.validate:
-        assert not config.train.hdf5_normalize_obs, "no support for observation normalization with validation data yet"
-        assert (train_filter_by_attribute is not None) and (valid_filter_by_attribute is not None), \
-            "did not specify filter keys corresponding to train and valid split in dataset" \
-            " - please fill config.train.hdf5_filter_key and config.train.hdf5_validation_filter_key"
-        train_demo_keys = FileUtils.get_demos_for_filter_key(
-            hdf5_path=os.path.expanduser(config.train.data),
-            filter_key=train_filter_by_attribute,
-        )
-        valid_demo_keys = FileUtils.get_demos_for_filter_key(
-            hdf5_path=os.path.expanduser(config.train.data),
-            filter_key=valid_filter_by_attribute,
-        )
-        assert set(train_demo_keys).isdisjoint(set(valid_demo_keys)), "training demonstrations overlap with " \
-            "validation demonstrations!"
-        trainset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS[config.algo_name], filter_by_attribute=train_filter_by_attribute)
-        validset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS[config.algo_name], filter_by_attribute=valid_filter_by_attribute)
-    else:
-        train_dataset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS[config.algo_name], filter_by_attribute=train_filter_by_attribute)
-        validset = None
-    train_sampler = trainset.get_dataset_sampler()
+    trainset, train_loader, validset, valid_loader = load_train_val_data(config=config)
     print("\n============= Training Dataset =============")
     print(trainset)
     print("")
     if validset is not None:
-        valid_sampler = validset.get_dataset_sampler()
         print("\n============= Validation Dataset =============")
         print(validset)
         print("")
@@ -143,28 +112,6 @@ def train(args):
     obs_normalization_stats = None
     if config.train.hdf5_normalize_obs:
         obs_normalization_stats = trainset.get_obs_normalization_stats()
-
-    train_loader = DataLoader(
-        dataset=trainset,
-        sampler=train_sampler,
-        batch_size=config.train.batch_size,
-        shuffle=(train_sampler is None),
-        num_workers=config.train.num_data_workers,
-        drop_last=True
-    )
-    if config.experiment.validate:
-        # cap num workers for validation dataset at 1
-        num_workers = min(config.train.num_data_workers, 1)
-        valid_loader = DataLoader(
-            dataset=validset,
-            sampler=valid_sampler,
-            batch_size=config.train.batch_size,
-            shuffle=(valid_sampler is None),
-            num_workers=num_workers,
-            drop_last=True
-        )
-    else:
-        valid_loader = None
 
 
     # print all warnings before training begins

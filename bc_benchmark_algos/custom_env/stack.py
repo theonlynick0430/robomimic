@@ -1,4 +1,4 @@
-import bc_benchmark_algos.utils.robosuite_env_utils as RobosuiteEnvUtils
+import bc_benchmark_algos.env.robosuite_env_utils as RobosuiteEnvUtils
 import numpy as np
 import argparse
 import json
@@ -7,6 +7,7 @@ import os
 import shutil
 from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
 from robosuite.scripts.collect_human_demonstrations import gather_demonstrations_as_hdf5
+
 
 # x, y, z -> out of screen, x-axis, y-axis
 def collect_demos(env, demos, render=True):
