@@ -535,6 +535,7 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None, obs_nor
     start_time = time.time()
 
     data_loader_iter = iter(data_loader)
+    print(f"Number of steps in epoch: {num_steps}")
     for _ in LogUtils.custom_tqdm(range(num_steps)):
 
         # load next batch from data loader

@@ -108,7 +108,7 @@ class BC(PolicyAlgo):
         """
         input_batch = dict()
         input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
-        input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
+        input_batch["goal"] = batch.get("goal", None) # goals may not be present
         input_batch["actions"] = batch["actions"][:, 0, :]
         # we move to device first before float conversion because image observation modalities will be uint8 -
         # this minimizes the amount of data transferred to GPU
@@ -159,7 +159,7 @@ class BC(PolicyAlgo):
             predictions (dict): dictionary containing network outputs
         """
         predictions = OrderedDict()
-        actions = self.nets["policy"](obs_dict=batch["obs"], goal_dict=batch["goal_obs"])
+        actions = self.nets["policy"](obs_dict=batch["obs"], goal_dict=batch["goal"])
         predictions["actions"] = actions
         return predictions
 
@@ -290,7 +290,7 @@ class BC_Gaussian(BC):
         """
         dists = self.nets["policy"].forward_train(
             obs_dict=batch["obs"], 
-            goal_dict=batch["goal_obs"],
+            goal_dict=batch["goal"],
         )
 
         # make sure that this is a batch of multivariate action distributions, so that
@@ -414,7 +414,7 @@ class BC_VAE(BC):
         vae_inputs = dict(
             actions=batch["actions"],
             obs_dict=batch["obs"],
-            goal_dict=batch["goal_obs"],
+            goal_dict=batch["goal"],
             freeze_encoder=batch.get("freeze_encoder", False),
         )
 
@@ -519,7 +519,7 @@ class BC_RNN(BC):
         """
         input_batch = dict()
         input_batch["obs"] = batch["obs"]
-        input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
+        input_batch["goal"] = batch.get("goal", None) # goals may not be present
         input_batch["actions"] = batch["actions"]
 
         if self._rnn_is_open_loop:
@@ -620,7 +620,7 @@ class BC_RNN_GMM(BC_RNN):
         """
         dists = self.nets["policy"].forward_train(
             obs_dict=batch["obs"], 
-            goal_dict=batch["goal_obs"],
+            goal_dict=batch["goal"],
         )
 
         # make sure that this is a batch of multivariate action distributions, so that
@@ -716,7 +716,7 @@ class BC_Transformer(BC):
         input_batch = dict()
         h = self.context_length
         input_batch["obs"] = {k: batch["obs"][k][:, :h, :] for k in batch["obs"]}
-        input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
+        input_batch["goal"] = batch.get("goal", None) # goals may not be present
 
         if self.supervise_all_steps:
             # supervision on entire sequence (instead of just current timestep)
@@ -749,7 +749,7 @@ class BC_Transformer(BC):
         )
 
         predictions = OrderedDict()
-        predictions["actions"] = self.nets["policy"](obs_dict=batch["obs"], actions=None, goal_dict=batch["goal_obs"])
+        predictions["actions"] = self.nets["policy"](obs_dict=batch["obs"], actions=None, goal_dict=batch["goal"])
         if not self.supervise_all_steps:
             # only supervise final timestep
             predictions["actions"] = predictions["actions"][:, -1, :]
@@ -810,7 +810,7 @@ class BC_Transformer_GMM(BC_Transformer):
         dists = self.nets["policy"].forward_train(
             obs_dict=batch["obs"], 
             actions=None,
-            goal_dict=batch["goal_obs"],
+            goal_dict=batch["goal"],
             low_noise_eval=False,
         )
 

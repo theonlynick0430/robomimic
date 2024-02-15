@@ -119,39 +119,14 @@ class Algo(object):
 
         self.ac_dim = ac_dim
         self.device = device
-        self.obs_key_shapes = obs_key_shapes
-
-        self.nets = nn.ModuleDict()
-        self._create_shapes(obs_config.modalities, obs_key_shapes)
-        self._create_networks()
-        self._create_optimizers()
-        assert isinstance(self.nets, nn.ModuleDict)
-
-    def _create_shapes(self, obs_keys, obs_key_shapes):
-        """
-        Create obs_shapes, goal_shapes, and subgoal_shapes dictionaries, to make it
-        easy for this algorithm object to keep track of observation key shapes. Each dictionary
-        maps observation key to shape.
-
-        Args:
-            obs_keys (dict): dict of required observation keys for this training run (usually
-                specified by the obs config), e.g., {"obs": ["rgb", "proprio"], "goal": ["proprio"]}
-            obs_key_shapes (dict): dict of observation key shapes, e.g., {"rgb": [3, 224, 224]}
-        """
-        # determine shapes
-        self.obs_shapes = OrderedDict()
+        self.obs_shapes = OrderedDict(obs_key_shapes)
         self.goal_shapes = OrderedDict()
         self.subgoal_shapes = OrderedDict()
 
-        # We check across all modality groups (obs, goal, subgoal), and see if the inputted observation key exists
-        # across all modalitie specified in the config. If so, we store its corresponding shape internally
-        for k in obs_key_shapes:
-            if "obs" in self.obs_config.modalities and k in [obs_key for modality in self.obs_config.modalities.obs.values() for obs_key in modality]:
-                self.obs_shapes[k] = obs_key_shapes[k]
-            if "goal" in self.obs_config.modalities and k in [obs_key for modality in self.obs_config.modalities.goal.values() for obs_key in modality]:
-                self.goal_shapes[k] = obs_key_shapes[k]
-            if "subgoal" in self.obs_config.modalities and k in [obs_key for modality in self.obs_config.modalities.subgoal.values() for obs_key in modality]:
-                self.subgoal_shapes[k] = obs_key_shapes[k]
+        self.nets = nn.ModuleDict()
+        self._create_networks()
+        self._create_optimizers()
+        assert isinstance(self.nets, nn.ModuleDict)
 
     def _create_networks(self):
         """
@@ -226,7 +201,7 @@ class Algo(object):
 
         # we will search the nested batch dictionary for the following special batch dict keys
         # and apply the processing function to their values (which correspond to observations)
-        obs_keys = ["obs", "next_obs", "goal_obs"]
+        obs_keys = ["obs", "goal"]
 
         def recurse_helper(d):
             """

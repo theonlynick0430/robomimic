@@ -1,33 +1,33 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "test",
-        "validate": false,
+        "name": "inv_dyn_rnn_square_peg_insertion",
+        "validate": true,
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
-            "log_wandb": false,
-            "wandb_proj_name": "debug"
+            "log_wandb": true,
+            "wandb_proj_name": "inv_dyn_rnn_square_peg_insertion"
         },
         "save": {
             "enabled": true,
             "every_n_seconds": null,
-            "every_n_epochs": 50,
+            "every_n_epochs": 100,
             "epochs": [],
             "on_best_validation": false,
             "on_best_rollout_return": false,
-            "on_best_rollout_success_rate": true
+            "on_best_rollout_success_rate": false
         },
-        "epoch_every_n_steps": 100,
-        "validation_epoch_every_n_steps": 10,
+        "epoch_every_n_steps": null,
+        "validation_epoch_every_n_steps": null,
         "env": null,
         "additional_envs": null,
         "render": false,
-        "render_video": true,
+        "render_video": false,
         "keep_all_videos": false,
         "video_skip": 5,
         "rollout": {
-            "enabled": true,
+            "enabled": false,
             "n": 50,
             "horizon": 400,
             "rate": 50,
@@ -39,12 +39,12 @@
         "data": null,
         "output_dir": null,
         "num_data_workers": 0,
+        "dataset_type": "robomimic",
         "hdf5_cache_mode": "all",
         "hdf5_use_swmr": true,
-        "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
-        "hdf5_filter_key": null,
-        "hdf5_validation_filter_key": null,
+        "hdf5_filter_key": "train",
+        "hdf5_validation_filter_key": "valid",
         "seq_length": 1,
         "pad_seq_length": true,
         "frame_stack": 0,
@@ -55,10 +55,11 @@
             "dones"
         ],
         "ac_dim": 7,
-        "goal_mode": null,
+        "goal_mode": "subgoal",
+        "num_subgoal": null,
         "cuda": true,
-        "batch_size": 100,
-        "num_epochs": 2000,
+        "batch_size": 16,
+        "num_epochs": 1000,
         "seed": 1
     },
     "algo": {

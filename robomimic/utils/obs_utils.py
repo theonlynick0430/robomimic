@@ -49,6 +49,8 @@ OBS_RANDOMIZERS = {"None": None}            # Include default None
 # Ex: {"bc": {"obs": {"robot0_eef_pos": [3]}, "goal": {"agentview_image": [2, 84, 84]}}}
 OBS_SHAPES = OrderedDict()
 
+OBS_GROUP_TO_KEYS = {}
+
 def register_obs_key(target_class):
     assert target_class not in OBS_MODALITY_CLASSES, f"Already registered modality {target_class}!"
     OBS_MODALITY_CLASSES[target_class.name] = target_class
@@ -176,9 +178,11 @@ def initialize_obs_utils_with_obs_specs(obs_modality_specs, obs_shape_spec):
     obs_modality_mapping = {}
     for module, obs_modality_spec in obs_modality_specs.items():
         module_shapes = OrderedDict()
+        module_obs_group_keys = {}
         # iterates over observation groups (e.g. observations, goals, subgoals)
         for obs_group, obs_modalities in obs_modality_spec.items():
             obs_group_shapes = OrderedDict()
+            obs_group_keys = []
             for obs_modality, obs_keys in obs_modalities.items():
                 # add all keys for each obs modality to the corresponding list in obs_modality_mapping
                 if obs_modality not in obs_modality_mapping:
@@ -197,10 +201,15 @@ def initialize_obs_utils_with_obs_specs(obs_modality_specs, obs_shape_spec):
                     assert obs_key in obs_shape_spec, \
                     f"Obs key {obs_key} has no corresponding shape in config"
                     obs_group_shapes[obs_key] = obs_shape_spec[obs_key]
+                obs_group_keys.extend(obs_keys)
             if obs_group_shapes:
                 module_shapes[obs_group] = obs_group_shapes
+            if len(obs_group_keys) > 0:
+                module_obs_group_keys[obs_group] = obs_group_keys
         if module_shapes:
             OBS_SHAPES[module] = module_shapes
+        if module_obs_group_keys:
+            OBS_GROUP_TO_KEYS[module] = module_obs_group_keys
 
     # remove duplicate entries and store in global mapping
     OBS_MODALITIES_TO_KEYS = { obs_modality : list(set(obs_modality_mapping[obs_modality])) for obs_modality in obs_modality_mapping }

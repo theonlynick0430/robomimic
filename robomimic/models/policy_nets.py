@@ -69,22 +69,9 @@ class ActorNetwork(MIMO_MLP):
         self.obs_shapes = obs_shapes
         self.ac_dim = ac_dim
 
-        # set up different observation groups for @MIMO_MLP
-        observation_group_shapes = OrderedDict()
-        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
-
-        self._is_goal_conditioned = False
-        if goal_shapes is not None and len(goal_shapes) > 0:
-            assert isinstance(goal_shapes, OrderedDict)
-            self._is_goal_conditioned = True
-            self.goal_shapes = OrderedDict(goal_shapes)
-            observation_group_shapes["goal"] = OrderedDict(self.goal_shapes)
-        else:
-            self.goal_shapes = OrderedDict()
-
         output_shapes = self._get_output_shapes()
         super(ActorNetwork, self).__init__(
-            input_obs_group_shapes=observation_group_shapes,
+            input_obs_group_shapes=self.obs_shapes,
             output_shapes=output_shapes,
             layer_dims=mlp_layer_dims,
             encoder_kwargs=encoder_kwargs,
@@ -618,22 +605,9 @@ class RNNActorNetwork(RNN_MIMO_MLP):
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
 
-        # set up different observation groups for @RNN_MIMO_MLP
-        observation_group_shapes = OrderedDict()
-        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
-
-        self._is_goal_conditioned = False
-        if goal_shapes is not None and len(goal_shapes) > 0:
-            assert isinstance(goal_shapes, OrderedDict)
-            self._is_goal_conditioned = True
-            self.goal_shapes = OrderedDict(goal_shapes)
-            observation_group_shapes["goal"] = OrderedDict(self.goal_shapes)
-        else:
-            self.goal_shapes = OrderedDict()
-
         output_shapes = self._get_output_shapes()
         super(RNNActorNetwork, self).__init__(
-            input_obs_group_shapes=observation_group_shapes,
+            input_obs_group_shapes=self.obs_shapes,
             output_shapes=output_shapes,
             mlp_layer_dims=mlp_layer_dims,
             mlp_activation=nn.ReLU,
@@ -678,12 +652,6 @@ class RNNActorNetwork(RNN_MIMO_MLP):
             actions (torch.Tensor): predicted action sequence
             rnn_state: return rnn state at the end if return_state is set to True
         """
-        if self._is_goal_conditioned:
-            assert goal_dict is not None
-            # repeat the goal observation in time to match dimension with obs_dict
-            mod = list(obs_dict.keys())[0]
-            goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
-
         outputs = super(RNNActorNetwork, self).forward(
             obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
 
@@ -844,12 +812,6 @@ class RNNGMMActorNetwork(RNNActorNetwork):
             dists (Distribution): sequence of GMM distributions over the timesteps
             rnn_state: return rnn state at the end if return_state is set to True
         """
-        if self._is_goal_conditioned:
-            assert goal_dict is not None
-            # repeat the goal observation in time to match dimension with obs_dict
-            mod = list(obs_dict.keys())[0]
-            goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
-
         outputs = RNN_MIMO_MLP.forward(
             self, obs=obs_dict, goal=goal_dict, rnn_init_state=rnn_init_state, return_state=return_state)
 
@@ -1048,22 +1010,9 @@ class TransformerActorNetwork(MIMO_Transformer):
 
         self.transformer_nn_parameter_for_timesteps = transformer_nn_parameter_for_timesteps
 
-        # set up different observation groups for @RNN_MIMO_MLP
-        observation_group_shapes = OrderedDict()
-        observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
-
-        self._is_goal_conditioned = False
-        if goal_shapes is not None and len(goal_shapes) > 0:
-            assert isinstance(goal_shapes, OrderedDict)
-            self._is_goal_conditioned = True
-            self.goal_shapes = OrderedDict(goal_shapes)
-            observation_group_shapes["goal"] = OrderedDict(self.goal_shapes)
-        else:
-            self.goal_shapes = OrderedDict()
-
         output_shapes = self._get_output_shapes()
         super(TransformerActorNetwork, self).__init__(
-            input_obs_group_shapes=observation_group_shapes,
+            input_obs_group_shapes=self.obs_shapes,
             output_shapes=output_shapes,
             transformer_embed_dim=transformer_embed_dim,
             transformer_num_layers=transformer_num_layers,
@@ -1109,12 +1058,6 @@ class TransformerActorNetwork(MIMO_Transformer):
             outputs (torch.Tensor or dict): contains predicted action sequence, or dictionary
                 with predicted action sequence and predicted observation sequences
         """
-        if self._is_goal_conditioned:
-            assert goal_dict is not None
-            # repeat the goal observation in time to match dimension with obs_dict
-            mod = list(obs_dict.keys())[0]
-            goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
-
         forward_kwargs = dict(obs=obs_dict, goal=goal_dict)
         outputs = super(TransformerActorNetwork, self).forward(**forward_kwargs)
 
@@ -1267,12 +1210,6 @@ class TransformerGMMActorNetwork(TransformerActorNetwork):
         Returns:
             dists (Distribution): sequence of GMM distributions over the timesteps
         """
-        if self._is_goal_conditioned:
-            assert goal_dict is not None
-            # repeat the goal observation in time to match dimension with obs_dict
-            mod = list(obs_dict.keys())[0]
-            goal_dict = TensorUtils.unsqueeze_expand_at(goal_dict, size=obs_dict[mod].shape[1], dim=1)
-
         forward_kwargs = dict(obs=obs_dict, goal=goal_dict)
 
         outputs = MIMO_Transformer.forward(self, **forward_kwargs)

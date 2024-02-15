@@ -85,6 +85,33 @@ class MIMO_Dataset(torch.utils.data.Dataset):
 
         self.load_demo_info()
 
+    @classmethod
+    def dataset_factory(cls, config, obs_group_to_keys):
+        """
+        Create a MIMO_Dataset instance from config.
+
+        Args:
+            config (BaseConfig instance): config object
+
+            obs_group_to_keys (dict): dictionary from observation group to observation keys
+
+        Returns:
+            dataset (MIMO_Dataset instance): dataset object
+        """
+        ds_kwargs = dict(
+            obs_group_to_keys=obs_group_to_keys,
+            dataset_keys=config.train.dataset_keys,
+            frame_stack=config.train.frame_stack,
+            seq_length=config.train.seq_length,
+            pad_frame_stack=config.train.pad_frame_stack,
+            pad_seq_length=config.train.pad_seq_length,
+            get_pad_mask=False,
+            goal_mode=config.train.goal_mode,
+            num_subgoal=config.train.num_subgoal
+        )
+        dataset = cls(**ds_kwargs)
+        return dataset
+
     @property
     def demos(self):
         """
@@ -376,6 +403,41 @@ class RobomimicDataset(MIMO_Dataset):
 
         self.close_and_delete_hdf5_handle()
 
+    @classmethod
+    def dataset_factory(cls, config, obs_group_to_keys, filter_by_attribute=None):
+        """
+        Create a RobomimicDataset instance from config.
+
+        Args:
+            config (BaseConfig instance): config object
+
+            obs_group_to_keys (dict): dictionary from observation group to observation keys
+
+            filter_by_attribute (str): if provided, use the provided filter key
+                to select a subset of demonstration trajectories to load
+
+        Returns:
+            dataset (RobomimicDataset instance): dataset object
+        """
+        ds_kwargs = dict(
+            hdf5_path=config.train.data,
+            obs_group_to_keys=obs_group_to_keys,
+            dataset_keys=config.train.dataset_keys,
+            frame_stack=config.train.frame_stack,
+            seq_length=config.train.seq_length,
+            pad_frame_stack=config.train.pad_frame_stack,
+            pad_seq_length=config.train.pad_seq_length,
+            get_pad_mask=False,
+            goal_mode=config.train.goal_mode,
+            num_subgoal=config.train.num_subgoal,
+            hdf5_cache_mode=config.train.hdf5_cache_mode,
+            hdf5_use_swmr=config.train.hdf5_use_swmr,
+            hdf5_normalize_obs=config.train.hdf5_normalize_obs,
+            filter_by_attribute=filter_by_attribute
+        )
+        dataset = cls(**ds_kwargs)
+        return dataset
+
     @property
     def demos(self):
         """
@@ -603,10 +665,6 @@ class RobomimicDataset(MIMO_Dataset):
         seq = dict()
         for k in keys:
             data = self.get_dataset_for_ep(demo_id, k)
-            if ObsUtils.has_modality(modality="rgb", obs_keys=[k.split('/')[-1]]):
-                if data.shape[-1] == 3:
-                    # (L, H, W, C) -> (L, C, H, W)
-                    data = np.transpose(data, (0, 3, 1, 2))
             seq[k] = data[seq_index]
 
         return seq
