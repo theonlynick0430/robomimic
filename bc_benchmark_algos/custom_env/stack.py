@@ -1,4 +1,4 @@
-import bc_benchmark_algos.env.robosuite_env_utils as RobosuiteEnvUtils
+import bc_benchmark_algos.custom_env.utils as RobosuiteEnvUtils
 import numpy as np
 import argparse
 import json

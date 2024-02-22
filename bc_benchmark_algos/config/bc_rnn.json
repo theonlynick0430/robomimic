@@ -23,7 +23,7 @@
         "env": null,
         "additional_envs": null,
         "render": false,
-        "render_video": false,
+        "render_video": true,
         "keep_all_videos": false,
         "video_skip": 5,
         "rollout": {
@@ -47,7 +47,7 @@
         "hdf5_validation_filter_key": "valid",
         "seq_length": 1,
         "pad_seq_length": true,
-        "frame_stack": 0,
+        "frame_stack": 10,
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions",

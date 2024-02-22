@@ -49,6 +49,9 @@ OBS_RANDOMIZERS = {"None": None}            # Include default None
 # Ex: {"bc": {"obs": {"robot0_eef_pos": [3]}, "goal": {"agentview_image": [2, 84, 84]}}}
 OBS_SHAPES = OrderedDict()
 
+# DO NOT MODIFY THIS
+# Dictionary that maps obs_group to obs_keys
+# Ex: {"obs": ["robot0_eef_pos", "agentview_image"], "goal": ["agentview_image"]}
 OBS_GROUP_TO_KEYS = {}
 
 def register_obs_key(target_class):

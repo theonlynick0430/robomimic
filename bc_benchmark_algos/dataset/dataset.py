@@ -72,9 +72,9 @@ class MIMO_Dataset(torch.utils.data.Dataset):
 
         # init data structures 
         self.total_num_sequences = 0
-        self._index_to_demo_id = dict()  # index in total_num_sequences -> demo_id
-        self._demo_id_to_start_index = dict()  # demo_id -> start index in total_num_sequences
-        self._demo_id_to_demo_length = dict() # demo_id -> length of demo in data
+        self.index_to_demo_id = dict()  # index in total_num_sequences -> demo_id
+        self.demo_id_to_start_index = dict()  # demo_id -> start index in total_num_sequences
+        self.demo_id_to_demo_length = dict() # demo_id -> length of demo in data
 
         self.load_demo_info()
 
@@ -131,8 +131,8 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         """
         for demo_id in self.demos:
             demo_length = self.get_demo_len(demo_id=demo_id)
-            self._demo_id_to_start_index[demo_id] = self.total_num_sequences
-            self._demo_id_to_demo_length[demo_id] = demo_length
+            self.demo_id_to_start_index[demo_id] = self.total_num_sequences
+            self.demo_id_to_demo_length[demo_id] = demo_length
 
             num_sequences = demo_length
             # determine actual number of sequences taking into account whether to pad for frame_stack and seq_length
@@ -148,7 +148,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
                 assert num_sequences >= 1  # assume demo_length >= (self.n_frame_stack + self.seq_length)
 
             for _ in range(num_sequences):
-                self._index_to_demo_id[self.total_num_sequences] = demo_id
+                self.index_to_demo_id[self.total_num_sequences] = demo_id
                 self.total_num_sequences += 1    
 
     def __len__(self):
@@ -182,10 +182,10 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         """
         Main implementation of getitem.
         """
-        demo_id = self._index_to_demo_id[index]
+        demo_id = self.index_to_demo_id[index]
         # convert index in total_num_sequences to index in data
         start_offset = 0 if self.pad_frame_stack else self.n_frame_stack
-        demo_index = index - self._demo_id_to_start_index[demo_id] + start_offset
+        demo_index = index - self.demo_id_to_start_index[demo_id] + start_offset
 
         data_seq_index, pad_mask = self.get_data_seq_index(demo_id=demo_id, index_in_demo=demo_index)
         meta = self.get_data_seq(demo_id=demo_id, keys=self.dataset_keys, seq_index=data_seq_index)
@@ -237,7 +237,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         Returns:
             data sequence indices and pad mask.
         """
-        demo_length = self._demo_id_to_demo_length[demo_id]
+        demo_length = self.demo_id_to_demo_length[demo_id]
         assert index_in_demo < demo_length
 
         # determine begin and end of sequence
@@ -272,7 +272,7 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         Returns:
             goal sequence indices.
         """
-        demo_length = self._demo_id_to_demo_length[demo_id]
+        demo_length = self.demo_id_to_demo_length[demo_id]
         goal_index = None
         if self.goal_mode == "last":
             goal_index = np.full((demo_length), -1) # every goal is the last state

@@ -461,41 +461,34 @@ class RolloutPolicy(object):
         self.policy.set_eval()
         self.policy.reset()
 
-    def _prepare_observation(self, ob):
+    def _prepare_observation(self, **inputs):
         """
-        Prepare raw observation dict from environment for policy.
+        Prepare inputs for policy.
 
         Args:
-            ob (dict): single observation dictionary from environment (no batch dimension, 
-                and np.array values for each key)
+            inputs (dict): nested dictionary that maps obs_group to obs_keys to 
+            tensors of form [B, T, D]
         """
-        ob = TensorUtils.to_tensor(ob)
-        ob = TensorUtils.to_batch(ob)
-        ob = TensorUtils.to_device(ob, self.policy.device)
-        ob = TensorUtils.to_float(ob)
+        inputs = TensorUtils.to_device(inputs, self.policy.device)
         if self.obs_normalization_stats is not None:
             # ensure obs_normalization_stats are torch Tensors on proper device
             obs_normalization_stats = TensorUtils.to_float(TensorUtils.to_device(TensorUtils.to_tensor(self.obs_normalization_stats), self.policy.device))
-            # limit normalization to obs keys being used, in case environment includes extra keys
-            ob = { k : ob[k] for k in self.policy.global_config.all_obs_keys }
-            ob = ObsUtils.normalize_obs(ob, obs_normalization_stats=obs_normalization_stats)
-        return ob
+            for obs_group in inputs:
+                inputs[obs_group] = ObsUtils.normalize_obs(inputs[obs_group], obs_normalization_stats=obs_normalization_stats)
+        return inputs
 
     def __repr__(self):
         """Pretty print network description"""
         return self.policy.__repr__()
 
-    def __call__(self, ob, goal=None):
+    def __call__(self, **inputs):
         """
-        Produce action from raw observation dict (and maybe goal dict) from environment.
+        Produce action from raw observation dict (and maybe goal dict).
 
         Args:
-            ob (dict): single observation dictionary from environment (no batch dimension, 
-                and np.array values for each key)
-            goal (dict): goal observation
+            inputs (dict): nested dictionary that maps obs_group to obs_keys to 
+            tensors of form [B, T, D]
         """
-        ob = self._prepare_observation(ob)
-        if goal is not None:
-            goal = self._prepare_observation(goal)
-        ac = self.policy.get_action(obs_dict=ob, goal_dict=goal)
+        inputs = self._prepare_observation(**inputs)
+        ac = self.policy.get_action(obs_dict=inputs["obs"], goal_dict=inputs["goal"])
         return TensorUtils.to_numpy(ac[0])

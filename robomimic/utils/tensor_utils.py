@@ -190,6 +190,53 @@ def to_sequence(x):
     )
 
 
+def repeat_seq(x, k):
+    """
+    Repeats the input along dimension 1 for torch tensors and numpy arrays in
+    nested dictionary or list or tuple and returns a new nested structure.
+
+    Args:
+        x (dict or list or tuple): a possibly nested dictionary or list or tuple
+
+        k (int): number of times to repeat along dim 1
+
+    Returns:
+        y (dict or list or tuple): new nested dict-list-tuple
+    """
+    return recursive_dict_list_tuple_apply(
+        x,
+        {
+            torch.Tensor: lambda x: torch.repeat_interleave(x, k, dim=1),
+            np.ndarray: lambda x: np.repeat(x, k, axis=1),
+            type(None): lambda x: x,
+        }
+    )
+
+
+def shift_seq(x, k):
+    """
+    Shifts the input by along dimension 1 for torch tensors and numpy arrays in 
+    nested dictionary or list or tuple and returns a new nested structure.
+
+    Args:
+        x (dict or list or tuple): a possibly nested dictionary or list or tuple
+
+        k (int): shift along dim 1
+
+    Returns:
+        y (dict or list or tuple): new nested dict-list-tuple
+    """
+    return recursive_dict_list_tuple_apply(
+        x,
+        {
+            torch.Tensor: lambda x: torch.roll(x, k, dims=1),
+            np.ndarray: lambda x: np.roll(x, k, axis=1),
+            type(None): lambda x: x,
+        }
+    )
+
+
+
 def index_at_time(x, ind):
     """
     Indexes all torch tensors and numpy arrays in dimension 1 with index @ind in
