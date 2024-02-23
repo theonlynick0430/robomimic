@@ -23,13 +23,16 @@ class RobomimicRolloutEnv(RolloutEnv):
     Class used to rollout policies in in Robomimic environments. 
     """
 
-    def __init__(self, validset, video_dir=None):
+    def __init__(self, config, validset, video_dir=None):
         """
         Args:
+            config (BaseConfig instance): config object
+
             validset (Dataset instance): validation dataset
 
             video_dir (str): (optional) directory to save rollout videos
         """
+        self.config = config
         self.validset: RobomimicDataset = validset
         self.video_dir = video_dir
 
@@ -49,16 +52,17 @@ class RobomimicRolloutEnv(RolloutEnv):
         x = dict()
         # populate input with first obs and goal
         x["obs"] = dict()
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS["obs"]:
+        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]:
             assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
             x["obs"][obs_key] = obs[obs_key]
-        x["goal"] = self.fetch_goal(0)[0]
         # add batch, seq dim
         x = TensorUtils.to_tensor(x)
         x = TensorUtils.to_batch(x)
         x = TensorUtils.to_sequence(x)
         # repeat along seq dim n_frame_stack+1 times to prepare history
         x = TensorUtils.repeat_seq(x=x, k=self.validset.n_frame_stack+1)
+        # fetch initial goal
+        x["goal"] = TensorUtils.to_batch(TensorUtils.to_tensor(self.fetch_goal(index=0)))
         return x
     
     def inputs_from_new_obs(self, x, obs, index):
@@ -75,7 +79,7 @@ class RobomimicRolloutEnv(RolloutEnv):
         """
         # update input using new obs
         x = TensorUtils.shift_seq(x=x, k=-1)
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS["obs"]:
+        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]:
             assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
             # only update last seq index to preserve history
             x["obs"][obs_key][:, -1, :] = obs[obs_key]
@@ -91,7 +95,7 @@ class RobomimicRolloutEnv(RolloutEnv):
         Returns:
             goal seq of length validset.n_frame_stack+1
         """
-        return self.validset[index]["goal"][:self.validset.n_frame_stack+2] # include goal for current timestep
+        return TensorUtils.slice(x=self.validset[index]["goal"], dim=1, start=0, end=self.validset.n_frame_stack+2)
 
     def create_env(self):
         """
@@ -142,13 +146,8 @@ class RobomimicRolloutEnv(RolloutEnv):
         policy.start_episode()
 
         # load initial state
-        initial_state = None
-        if self.validset.hdf5_cache_mode in ["all", "low_dim"]:
-            initial_state = dict(states=self.validset.hdf5_cache[demo_id]["states"][0])
-            initial_state["model"] = self.validset.hdf5_cache[demo_id]["attrs"]["model_file"]
-        else:
-            initial_state = dict(states=self.validset.hdf5_file[f"data/{demo_id}/states"][0])
-            initial_state["model"] = self.validset.hdf5_file[f"data/{demo_id}"].attrs["model_file"]
+        initial_state = dict(states=self.validset.hdf5_file[f"data/{demo_id}/states"][0])
+        initial_state["model"] = self.validset.hdf5_file[f"data/{demo_id}"].attrs["model_file"]
         self.env.reset()
         obs = self.env.reset_to(initial_state)
 
@@ -245,7 +244,9 @@ class RobomimicRolloutEnv(RolloutEnv):
             rollout_info["time"] = time.time() - rollout_timestamp
             rollout_logs.append(rollout_info)
             if verbose:
-                print(f"demo={demo_id}, horizon={rollout_info["Horizon"]}, num_success={rollout_info["Success_Rate"]}")
+                horizon = rollout_info["Horizon"]
+                num_success = rollout_info["Success_Rate"]
+                print(f"demo={demo_id}, horizon={horizon}, num_success={num_success}")
                 print(json.dumps(rollout_info, sort_keys=True, indent=4))
 
         if write_video:

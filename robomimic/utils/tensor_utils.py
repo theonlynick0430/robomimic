@@ -236,6 +236,33 @@ def shift_seq(x, k):
     )
 
 
+def slice(x, dim, start, end):
+    """
+    Slice the input by along dimension @dim from indices @start to @end 
+    for torch tensors and numpy arrays in nested dictionary or list or tuple 
+    and returns a new nested structure.
+
+    Args:
+        x (dict or list or tuple): a possibly nested dictionary or list or tuple
+
+        dim (int): dimension to slice along
+
+        start (int): start index
+
+        end (int): end index
+
+    Returns:
+        y (dict or list or tuple): new nested dict-list-tuple
+    """
+    return recursive_dict_list_tuple_apply(
+        x,
+        {
+            torch.Tensor: lambda x: torch.index_select(x, dim, torch.arange(start, end)),
+            np.ndarray: lambda x: np.take(x, np.arange(start, end), axis=dim),
+            type(None): lambda x: x,
+        }
+    )
+
 
 def index_at_time(x, ind):
     """
