@@ -1,21 +1,17 @@
 from bc_benchmark_algos.rollout_env.rollout_env import RolloutEnv
 from bc_benchmark_algos.dataset.robomimic import RobomimicDataset
-import robomimic.utils.train_utils as TrainUtils
-import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
-import robomimic.utils.log_utils as LogUtils
-from collections import OrderedDict
-from robomimic.algo import algo_factory, RolloutPolicy
+from robomimic.algo import RolloutPolicy
 import imageio
-import h5py
 import numpy as np
 import tqdm
 import os
 import time
 import json
+import torch
 
 
 class RobomimicRolloutEnv(RolloutEnv):
@@ -24,79 +20,21 @@ class RobomimicRolloutEnv(RolloutEnv):
     """
 
     def __init__(self, config, validset, video_dir=None):
-        """
-        Args:
-            config (BaseConfig instance): config object
-
-            validset (Dataset instance): validation dataset
-
-            video_dir (str): (optional) directory to save rollout videos
-        """
-        self.config = config
-        self.validset: RobomimicDataset = validset
-        self.video_dir = video_dir
-
+        super(RobomimicRolloutEnv, self).__init__(
+            config=config, 
+            validset=validset, 
+            video_dir=video_dir
+        )
         assert isinstance(self.validset, RobomimicDataset)
-        assert self.validset.pad_frame_stack and self.validset.pad_seq_length, "validation set must pad frame stack and seq"
-
-        self.create_env()
-
-    def inputs_from_initial_obs(self, obs):
-        """
-        Args: 
-            obs (dict): maps obs_key to data of form [D]
-
-        Returns:
-            x (dict): maps obs_group to obs_key to data of form [B=1, T=pad_frame_stack+1, D]
-        """
-        x = dict()
-        # populate input with first obs and goal
-        x["obs"] = dict()
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]:
-            assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
-            x["obs"][obs_key] = obs[obs_key]
-        # add batch, seq dim
-        x = TensorUtils.to_tensor(x)
-        x = TensorUtils.to_batch(x)
-        x = TensorUtils.to_sequence(x)
-        # repeat along seq dim n_frame_stack+1 times to prepare history
-        x = TensorUtils.repeat_seq(x=x, k=self.validset.n_frame_stack+1)
-        # fetch initial goal
-        x["goal"] = TensorUtils.to_batch(TensorUtils.to_tensor(self.fetch_goal(index=0)))
-        return x
     
-    def inputs_from_new_obs(self, x, obs, index):
-        """
-        Args: 
-            x (dict): maps obs_group to obs_key to data of form [B=1, T=pad_frame_stack+1, D]
-
-            obs (dict): maps obs_key to data of form [D]
-
-            index (int): index of trajectory in dataset
-
-        Returns:
-            updated input @x
-        """
-        # update input using new obs
-        x = TensorUtils.shift_seq(x=x, k=-1)
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]:
-            assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
-            # only update last seq index to preserve history
-            x["obs"][obs_key][:, -1, :] = obs[obs_key]
-        # fetch new goal
-        x["goal"] = TensorUtils.to_batch(TensorUtils.to_tensor(self.fetch_goal(index=index)))
-        return x
-    
-    def fetch_goal(self, index):
-        """
-        Args: 
-            index (int): index of trajectory in dataset
-
-        Returns:
-            goal seq of length validset.n_frame_stack+1
-        """
-        return TensorUtils.slice(x=self.validset[index]["goal"], dim=1, start=0, end=self.validset.n_frame_stack+2)
-
+    def fetch_goal(self, demo_id, t):
+        index = self.validset.demo_id_to_start_index[demo_id] + t
+        print(self.validset[index]["goal"]["agentview_image"].shape)
+        goal = TensorUtils.slice(x=self.validset[index]["goal"], dim=0, start=0, end=self.validset.n_frame_stack+1)
+        goal = TensorUtils.to_tensor(x=goal, device=self.device)
+        goal = TensorUtils.to_batch(x=goal)
+        return goal
+        
     def create_env(self):
         """
         Create environment associated with dataset.
@@ -119,7 +57,6 @@ class RobomimicRolloutEnv(RolloutEnv):
                 use_image_obs=ObsUtils.has_modality("rgb", self.config.all_obs_keys),
                 use_depth_obs=ObsUtils.has_modality("depth", self.config.all_obs_keys),
             )
-        self.env = EnvUtils.wrap_env_from_config(self.env, config=self.config) # apply environment warpper, if applicable
 
     def run_rollout(
             self, 

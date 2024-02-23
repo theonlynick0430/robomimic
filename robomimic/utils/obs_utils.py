@@ -372,11 +372,24 @@ def process_obs_dict(obs_dict):
     return { k : process_obs(obs=obs, obs_key=k) for k, obs in obs_dict.items() } # shallow copy
 
 
+def process_inputs(**inputs):
+    """
+    Process @inputs dictionary to prepare for network input.
+
+    Args:
+        inputs (dict): dictionary mapping obs_group to obs_keys to data.
+
+    Returns:
+        new_dict (dict): dictionary where observation keys have been processed by their corresponding processors
+    """
+    return { obs_group : process_obs_dict(obs_dict=obs_keys) for obs_group, obs_keys in inputs.items() }
+
+
 def process_frame(frame, channel_dim, scale):
     """
     Given frame fetched from dataset, process for network input. Converts array
     to float (from uint8), normalizes pixels from range [0, @scale] to [0, 1], and channel swaps
-    from (H, W, C) to (C, H, W).
+    from (H, W, C) to (C, H, W) if necessary.
 
     Args:
         frame (np.array or torch.Tensor): frame array
@@ -386,14 +399,12 @@ def process_frame(frame, channel_dim, scale):
     Returns:
         processed_frame (np.array or torch.Tensor): processed frame
     """
-    # Channel size should either be 3 (RGB) or 1 (depth)
-    assert (frame.shape[-1] == channel_dim)
     frame = TU.to_float(frame)
     if scale is not None:
         frame = frame / scale
         frame = frame.clip(0.0, 1.0)
-    frame = batch_image_hwc_to_chw(frame)
-
+    if frame.shape[-1] == channel_dim:
+        frame = batch_image_hwc_to_chw(frame)
     return frame
 
 
@@ -450,10 +461,10 @@ def unprocess_frame(frame, channel_dim, scale):
         unprocessed_frame (np.array or torch.Tensor): frame passed through
             inverse operation of @process_frame
     """
-    assert frame.shape[-3] == channel_dim # check for channel dimension
-    frame = batch_image_chw_to_hwc(frame)
     if scale is not None:
         frame = scale * frame
+    if frame.shape[-3] == channel_dim:
+        frame = batch_image_chw_to_hwc(frame)
     return frame
 
 

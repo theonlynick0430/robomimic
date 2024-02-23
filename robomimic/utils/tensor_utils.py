@@ -350,7 +350,7 @@ def to_device(x, device):
     )
 
 
-def to_tensor(x):
+def to_tensor(x, device=None):
     """
     Converts all numpy arrays in nested dictionary or list or tuple to
     torch tensors (and leaves existing torch Tensors as-is), and returns 
@@ -358,6 +358,8 @@ def to_tensor(x):
 
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
+        
+        device: device to send tensors to
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -365,8 +367,8 @@ def to_tensor(x):
     return recursive_dict_list_tuple_apply(
         x,
         {
-            torch.Tensor: lambda x: x,
-            np.ndarray: lambda x: torch.from_numpy(x),
+            torch.Tensor: lambda x: x.to(device=device),
+            np.ndarray: lambda x: torch.from_numpy(x).to(device=device),
             type(None): lambda x: x,
         }
     )
