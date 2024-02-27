@@ -24,6 +24,7 @@ class RolloutEnv:
         self.config = config
         self.validset: RobomimicDataset = validset
         self.video_dir = video_dir
+        self.write_video = self.video_dir is not None
         self.device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
 
         assert isinstance(self.validset, MIMO_Dataset)
@@ -103,6 +104,7 @@ class RolloutEnv:
     def run_rollout(
             self, 
             policy, 
+            demo_id,
             video_writer=None,
             video_skip=5,
             terminate_on_success=False,
@@ -110,6 +112,8 @@ class RolloutEnv:
         """
         Args:
             policy (RolloutPolicy instance): policy to use for rollouts
+
+            demo_id (str): id of demo to rollout
 
             video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
                 rate given by @video_skip
@@ -123,8 +127,8 @@ class RolloutEnv:
     def rollout_with_stats(
             self, 
             policy, 
+            demo_id,
             video_writer=None,
-            epoch=None,
             video_skip=5,
             terminate_on_success=False, 
             verbose=False,
@@ -133,10 +137,10 @@ class RolloutEnv:
         Args:
             policy (RolloutPolicy instance): policy to use for rollouts
 
+            demo_id (str): id of demo to rollout
+
             video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
                 rate given by @video_skip
-
-            epoch (int): epoch number (used for video naming)
 
             video_skip (int): how often to write video frame
 

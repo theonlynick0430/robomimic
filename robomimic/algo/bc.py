@@ -562,8 +562,12 @@ class BC_RNN(BC):
             obs_to_use = self._open_loop_obs
 
         self._rnn_counter += 1
-        action, self._rnn_hidden_state = self.nets["policy"].forward_step(
-            obs_to_use, goal_dict=goal_dict, rnn_state=self._rnn_hidden_state)
+        action, self._rnn_hidden_state = self.nets["policy"](
+            obs_dict=obs_to_use,
+            goal_dict=goal_dict,
+            rnn_init_state=self._rnn_hidden_state,
+            return_state=True
+            )
         return action
 
     def reset(self):

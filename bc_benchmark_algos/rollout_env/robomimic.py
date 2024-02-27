@@ -29,7 +29,6 @@ class RobomimicRolloutEnv(RolloutEnv):
     
     def fetch_goal(self, demo_id, t):
         index = self.validset.demo_id_to_start_index[demo_id] + t
-        print(self.validset[index]["goal"]["agentview_image"].shape)
         goal = TensorUtils.slice(x=self.validset[index]["goal"], dim=0, start=0, end=self.validset.n_frame_stack+1)
         goal = TensorUtils.to_tensor(x=goal, device=self.device)
         goal = TensorUtils.to_batch(x=goal)
@@ -66,12 +65,9 @@ class RobomimicRolloutEnv(RolloutEnv):
             video_skip=5,
             terminate_on_success=False
         ):
-        """
-        Args:
-            demo_id (str): id of demo to rollout
-        """
         super(RobomimicRolloutEnv, self).run_rollout(
             policy=policy,
+            demo_id=demo_id,
             video_writer=video_writer, 
             video_skip=video_skip, 
             terminate_on_success=terminate_on_success
@@ -89,7 +85,7 @@ class RobomimicRolloutEnv(RolloutEnv):
         obs = self.env.reset_to(initial_state)
 
         # policy inputs from initial observation
-        inputs = self.inputs_from_initial_obs(obs=obs)
+        inputs = self.inputs_from_initial_obs(obs=obs, demo_id=demo_id)
 
         results = {}
         video_count = 0  # video frame counter
@@ -98,7 +94,7 @@ class RobomimicRolloutEnv(RolloutEnv):
         try:
             for step_i in range(demo_len):
                 # compute new inputs
-                inputs = self.inputs_from_new_obs(x=inputs, obs=obs, index=demo_index+step_i)
+                inputs = self.inputs_from_new_obs(x=inputs, obs=obs, demo_id=demo_id, t=demo_index+step_i)
 
                 # get action from policy
                 ac = policy(**inputs)
@@ -141,52 +137,48 @@ class RobomimicRolloutEnv(RolloutEnv):
     def rollout_with_stats(
             self, 
             policy, 
+            demo_id,
             video_writer=None,
-            epoch=None,
             video_skip=5,
             terminate_on_success=False, 
             verbose=False,
         ):   
         super(RobomimicRolloutEnv, self).rollout_with_stats(
             policy=policy,
+            demo_id=demo_id,
             video_writer=video_writer, 
-            epoch=epoch,
             video_skip=video_skip, 
             terminate_on_success=terminate_on_success, 
             verbose=verbose
             )
-        
-        # create video writer
-        write_video = self.video_dir is not None
-        video_path = None
-        video_writer = None
-        if write_video:
-            video_str = "_epoch_{}.mp4".format(epoch) if epoch is not None else ".mp4" 
-            video_path = os.path.join(self.video_dir, "{}".format(video_str))
-            video_writer = imageio.get_writer(video_path, fps=20)
-            print("video writes to " + video_path)
 
         rollout_logs = []
-        # rollout on each demo in validset
-        for i in tqdm(self.validset.num_demos):
-            demo_id = self.validset.demos[i]
-            rollout_timestamp = time.time()
-            rollout_info = self.run_rollout(
-                policy=policy, 
-                demo_id=demo_id, 
-                video_writer=video_writer, 
-                video_skip=video_skip, 
-                terminate_on_success=terminate_on_success, 
-            )
-            rollout_info["time"] = time.time() - rollout_timestamp
-            rollout_logs.append(rollout_info)
-            if verbose:
-                horizon = rollout_info["Horizon"]
-                num_success = rollout_info["Success_Rate"]
-                print(f"demo={demo_id}, horizon={horizon}, num_success={num_success}")
-                print(json.dumps(rollout_info, sort_keys=True, indent=4))
+        rollout_timestamp = time.time()
 
-        if write_video:
+        # create video writer
+        video_path = None
+        if self.write_video and video_writer is None:
+            video_str = f"{demo_id}.mp4"
+            video_path = os.path.join(self.video_dir, f"{video_str}")
+            video_writer = imageio.get_writer(video_path, fps=20)
+            print("video writes to " + video_path)
+        
+        rollout_info = self.run_rollout(
+            policy=policy, 
+            demo_id=demo_id, 
+            video_writer=video_writer, 
+            video_skip=video_skip, 
+            terminate_on_success=terminate_on_success, 
+        )
+        rollout_info["time"] = time.time() - rollout_timestamp
+        rollout_logs.append(rollout_info)
+        if verbose:
+            horizon = rollout_info["Horizon"]
+            num_success = rollout_info["Success_Rate"]
+            print(f"demo={demo_id}, horizon={horizon}, num_success={num_success}")
+            print(json.dumps(rollout_info, sort_keys=True, indent=4))
+
+        if self.write_video:
             video_writer.close()
 
         # average metric across all episodes

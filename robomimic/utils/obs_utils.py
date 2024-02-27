@@ -403,6 +403,7 @@ def process_frame(frame, channel_dim, scale):
     if scale is not None:
         frame = frame / scale
         frame = frame.clip(0.0, 1.0)
+    # only swap channel dim if it is the last one
     if frame.shape[-1] == channel_dim:
         frame = batch_image_hwc_to_chw(frame)
     return frame
@@ -902,7 +903,9 @@ class ImageModality(Modality):
         Returns:
             processed_obs (np.array or torch.Tensor): processed image
         """
-        return process_frame(frame=obs, channel_dim=3, scale=255.)
+        # only normalize if necessary
+        scale = 255. if obs.dtype == np.uint8 or obs.dtype == torch.uint8 else 1.
+        return process_frame(frame=obs, channel_dim=3, scale=scale)
 
     @classmethod
     def _default_obs_unprocessor(cls, obs):
@@ -917,7 +920,9 @@ class ImageModality(Modality):
             unprocessed_obs (np.array or torch.Tensor): image passed through
                 inverse operation of @process_frame
         """
-        return TU.to_uint8(unprocess_frame(frame=obs, channel_dim=3, scale=255.))
+        # only scale if necessary
+        scale = 255. if obs.dtype == np.float32 or obs.dtype == torch.float32 else 1.
+        return TU.to_uint8(unprocess_frame(frame=obs, channel_dim=3, scale=scale))
 
 
 class DepthModality(Modality):
