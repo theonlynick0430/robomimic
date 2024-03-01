@@ -1,15 +1,12 @@
-import robomimic
 import robomimic.utils.train_utils as TrainUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
-import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
-import robomimic.utils.log_utils as LogUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
 from bc_benchmark_algos.dataset.robomimic import load_train_val_data
-from torch.utils.data import DataLoader
+from bc_benchmark_algos.rollout_env.robomimic import RobomimicRolloutEnv
 import torch
 import numpy as np
 import json
@@ -17,26 +14,25 @@ import os
 import time
 import argparse
 import sys
+import shutil
+import psutil
 
+
+def load_config(args):
+    ext_cfg = json.load(open(args.config, 'r'))
+    config = config_factory(ext_cfg["algo_name"])
+    with config.unlocked():
+        config.update(ext_cfg)
+    config.train.data = args.dataset
+    config.train.output_dir = args.output
+    config.lock()
+    return config
 
 def train(args):
 
     ### CONFIG ###
-
     print("\n============= New Training Run with Config =============")
-    ext_cfg = json.load(open(args.config, 'r'))
-    config = config_factory(ext_cfg["algo_name"])
-    # update config with external json - this will throw errors if
-    # the external config has keys not present in the base algo config
-    with config.unlocked():
-        config.update(ext_cfg)
-    # get torch device
-    device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
-    config.train.data = args.dataset
-    # send output to a temporary directory
-    config.train.output_dir = args.output
-    # lock config to prevent further modifications and ensure missing keys raise errors
-    config.lock()
+    config = load_config(args=args)
     print(config)
     print("")
 
@@ -45,9 +41,9 @@ def train(args):
     torch.manual_seed(config.train.seed)
     torch.set_num_threads(2)
 
+    device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
 
     ### OUTPUT ###
-
     log_dir, ckpt_dir, video_dir = TrainUtils.get_exp_dir(config)
 
     if config.experiment.logging.terminal_output_to_txt:
@@ -63,41 +59,18 @@ def train(args):
         log_wandb=config.experiment.logging.log_wandb,
     )
 
-
     ### OBS UTILS ###
-
     print("\n============= Observation Utils =============")
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
     ObsUtils.initialize_obs_utils_with_config(config)
-    # verify important obs utils
-    print("OBS_MODALITIES_TO_KEYS:")
-    print(ObsUtils.OBS_MODALITIES_TO_KEYS)
-    print("OBS_KEYS_TO_MODALITIES:")
-    print(ObsUtils.OBS_KEYS_TO_MODALITIES)
-    print("OBS_SHAPES:")
-    print(ObsUtils.OBS_SHAPES)
-    print("OBS_GROUP_TO_KEYS:")
-    print(ObsUtils.OBS_GROUP_TO_KEYS)
-    print("")
 
-
-    ### MODEL ####
-
-    print("\n============= Model Summary =============")
-    ac_dim = config.train.ac_dim
-    model = algo_factory(
-        algo_name=config.algo_name,
-        config=config,
-        obs_key_shapes=ObsUtils.OBS_SHAPES[config.algo_name],
-        ac_dim=ac_dim,
-        device=device,
+    shape_meta = FileUtils.get_shape_metadata_from_dataset(
+        dataset_path=config.train.data,
+        all_obs_keys=config.all_obs_keys,
+        verbose=True
     )
-    print(model)  # print model summary
-    print("")
 
-
-    #### DATASET ###
-
+    ### DATASET ###
     assert config.train.dataset_type == "robomimic", "only robomimic datasets currently supported"
     trainset, train_loader, validset, valid_loader = load_train_val_data(config=config)
     print("\n============= Training Dataset =============")
@@ -113,6 +86,24 @@ def train(args):
     if config.train.hdf5_normalize_obs:
         obs_normalization_stats = trainset.get_obs_normalization_stats()
 
+    ### MODEL ###
+    print("\n============= Model Summary =============")
+    ac_dim = config.train.ac_dim
+    model = algo_factory(
+        algo_name=config.algo_name,
+        config=config,
+        obs_key_shapes=ObsUtils.OBS_SHAPES[config.algo_name],
+        ac_dim=ac_dim,
+        device=device,
+    )
+    # wrap model as a RolloutPolicy to prepare for rollouts
+    rollout_model = RolloutPolicy(model, obs_normalization_stats=obs_normalization_stats)
+    print(model)
+    print("")
+
+    ### ROLLOUT ENV ###
+    assert config.train.dataset_type == "robomimic", "only robomimic envs currently supported"
+    rollout_env = RobomimicRolloutEnv(config=config, validset=validset)
 
     # print all warnings before training begins
     print("*" * 50)
@@ -121,18 +112,18 @@ def train(args):
     print("*" * 50)
     print("")
 
-
     ## TRAINING ###
-
-    # main training loop
+    best_valid_loss = None
+    best_return = -np.inf if config.experiment.rollout.enabled else None
+    best_success_rate = -1. if config.experiment.rollout.enabled else None
     last_ckpt_time = time.time()
-
     # number of learning steps per epoch (defaults to a full dataset pass)
     train_num_steps = config.experiment.epoch_every_n_steps
     valid_num_steps = config.experiment.validation_epoch_every_n_steps
-
+    # main training loop
     for epoch in range(1, config.train.num_epochs + 1): # epoch numbers start at 1
-        print(f"Epoch: {epoch}")
+        
+        # train
         step_log = TrainUtils.run_epoch(
             model=model,
             data_loader=train_loader,
@@ -141,6 +132,120 @@ def train(args):
             obs_normalization_stats=obs_normalization_stats,
         )
         model.on_epoch_end(epoch)
+
+        print("Train Epoch {}".format(epoch))
+        print(json.dumps(step_log, sort_keys=True, indent=4))
+        for k, v in step_log.items():
+            if k.startswith("Time_"):
+                data_logger.record("Timing_Stats/Train_{}".format(k[5:]), v, epoch)
+            else:
+                data_logger.record("Train/{}".format(k), v, epoch)
+
+        # check for recurring checkpoint saving conditions
+        epoch_ckpt_name = "model_epoch_{}".format(epoch)
+        should_save_ckpt = False
+        if config.experiment.save.enabled:
+            time_check = (config.experiment.save.every_n_seconds is not None) and \
+                (time.time() - last_ckpt_time > config.experiment.save.every_n_seconds)
+            epoch_check = (config.experiment.save.every_n_epochs is not None) and \
+                (epoch > 0) and (epoch % config.experiment.save.every_n_epochs == 0)
+            epoch_list_check = (epoch in config.experiment.save.epochs)
+            should_save_ckpt = (time_check or epoch_check or epoch_list_check)
+        ckpt_reason = None
+        if should_save_ckpt:
+            last_ckpt_time = time.time()
+            ckpt_reason = "time"
+
+        # validate
+        if config.experiment.validate:
+            with torch.no_grad():
+                step_log = TrainUtils.run_epoch(model=model, data_loader=valid_loader, epoch=epoch, validate=True, num_steps=valid_num_steps)
+
+            print("Validation Epoch {}".format(epoch))
+            print(json.dumps(step_log, sort_keys=True, indent=4))
+            for k, v in step_log.items():
+                if k.startswith("Time_"):
+                    data_logger.record("Timing_Stats/Valid_{}".format(k[5:]), v, epoch)
+                else:
+                    data_logger.record("Valid/{}".format(k), v, epoch)
+            
+            # save checkpoint if achieve new best validation loss
+            valid_check = "Loss" in step_log
+            if valid_check and (best_valid_loss is None or (step_log["Loss"] <= best_valid_loss)):
+                best_valid_loss = step_log["Loss"]
+                if config.experiment.save.enabled and config.experiment.save.on_best_validation:
+                    epoch_ckpt_name += "_best_validation_{}".format(best_valid_loss)
+                    should_save_ckpt = True
+                    ckpt_reason = "valid" if ckpt_reason is None else ckpt_reason
+
+        # rollout
+        rollout_check = (epoch % config.experiment.rollout.rate == 0)
+        if config.experiment.rollout.enabled and (epoch > config.experiment.rollout.warmstart) and rollout_check:
+            # create directory for this epoch
+            rollout_dir = os.path.join(video_dir, f"epoch_{epoch}")
+            os.mkdir(rollout_dir)
+
+            rollout_logs = []
+            for demo_id in validset.demos:
+                rollout_info = rollout_env.rollout_with_stats(
+                    policy=rollout_model,
+                    demo_id=demo_id,
+                    video_dir=rollout_dir if config.experiment.render_video else None,
+                    video_skip=config.experiment.get("video_skip", 5),
+                    terminate_on_success=config.experiment.rollout.terminate_on_success,
+                )
+                rollout_logs.append(rollout_info)
+            # average metric across all episodes
+            rollout_logs = dict((k, [rollout_logs[i][k] for i in range(len(rollout_logs))]) for k in rollout_logs[0])
+            rollout_logs_mean = dict((k, np.mean(v)) for k, v in rollout_logs.items())
+            rollout_logs_mean["Time_Episode"] = np.sum(rollout_logs["Time"]) / 60. # total time taken for rollouts in minutes
+
+            # summarize results from rollout to tensorboard and terminal
+            print("\nEpoch {} Rollouts took {}s (avg) with results:".format(epoch, rollout_logs_mean["Time"]))
+            print(json.dumps(rollout_logs_mean, sort_keys=True, indent=4))
+            for k, v in rollout_logs_mean.items():
+                if k.startswith("Time_"):
+                    data_logger.record("Timing_Stats/Rollout_{}".format(k[5:]), v, epoch)
+                else:
+                    data_logger.record("Rollout/{}".format(k), v, epoch, log_stats=True)
+
+            # checkpoint and video saving logic
+            updated_stats = TrainUtils.should_save_from_rollout_logs(
+                rollout_logs=rollout_logs_mean,
+                best_return=best_return,
+                best_success_rate=best_success_rate,
+                epoch_ckpt_name=epoch_ckpt_name,
+                save_on_best_rollout_return=config.experiment.save.on_best_rollout_return,
+                save_on_best_rollout_success_rate=config.experiment.save.on_best_rollout_success_rate,
+            )
+            best_return = updated_stats["best_return"]
+            best_success_rate = updated_stats["best_success_rate"]
+            epoch_ckpt_name = updated_stats["epoch_ckpt_name"]
+            should_save_ckpt = (config.experiment.save.enabled and updated_stats["should_save_ckpt"]) or should_save_ckpt
+            if updated_stats["ckpt_reason"] is not None:
+                ckpt_reason = updated_stats["ckpt_reason"]
+            
+            # only keep saved videos if the ckpt should be saved (but not because of validation score)
+            should_save_video = (should_save_ckpt and (ckpt_reason != "valid")) or config.experiment.keep_all_videos
+            if not should_save_video and config.experiment.render_video:
+                shutil.rmtree(rollout_dir)
+
+        # save model checkpoints based on conditions (success rate, validation loss, etc)
+        if should_save_ckpt:
+            TrainUtils.save_model(
+                model=model,
+                config=config,
+                env_meta=rollout_env.env_meta,
+                shape_meta=shape_meta,
+                ckpt_path=os.path.join(ckpt_dir, epoch_ckpt_name + ".pth"),
+                obs_normalization_stats=obs_normalization_stats,
+            )
+
+        # Finally, log memory usage in MB
+        process = psutil.Process(os.getpid())
+        mem_usage = int(process.memory_info().rss / 1000000)
+        data_logger.record("System/RAM Usage (MB)", mem_usage, epoch)
+        print("\nEpoch {} Memory Usage: {} MB\n".format(epoch, mem_usage))
 
     # terminate logging
     data_logger.close()

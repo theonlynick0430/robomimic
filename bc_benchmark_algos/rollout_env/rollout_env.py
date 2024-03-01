@@ -1,10 +1,14 @@
 from bc_benchmark_algos.dataset.dataset import MIMO_Dataset
-from bc_benchmark_algos.dataset.robomimic import RobomimicDataset
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.torch_utils as TorchUtils
 from robomimic.algo import RolloutPolicy
 import torch
+import imageio
+import time
+import json
+import numpy as np
+import os
 
 
 class RolloutEnv:
@@ -12,19 +16,15 @@ class RolloutEnv:
     Abstract class used to rollout policies in different environments. 
     """
 
-    def __init__(self, config, validset, video_dir=None):
+    def __init__(self, config, validset):
         """
         Args:
             config (BaseConfig instance): config object
 
             validset (Dataset instance): validation dataset
-
-            video_dir (str): (optional) directory to save rollout videos
         """
         self.config = config
-        self.validset: RobomimicDataset = validset
-        self.video_dir = video_dir
-        self.write_video = self.video_dir is not None
+        self.validset = validset
         self.device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
 
         assert isinstance(self.validset, MIMO_Dataset)
@@ -40,13 +40,16 @@ class RolloutEnv:
     
     def inputs_from_initial_obs(self, obs, demo_id):
         """
+        Create inputs for model from initial observation by repeating it.
+
         Args: 
             obs (dict): maps obs_key to data of shape [D]
 
             demo_id (str): id of the demo, e.g., demo_0
 
         Returns:
-            x (dict): maps obs_group to obs_key to data of shape [B=1, T=pad_frame_stack+1, D]
+            x (dict): maps obs_group to obs_key to
+                tensor of shape [B=1, T=pad_frame_stack+1, D] on @self.device
         """
         x = dict()
         # populate input with first obs and goal
@@ -67,10 +70,13 @@ class RolloutEnv:
     
     def inputs_from_new_obs(self, x, obs, demo_id, t):
         """
-        Args: 
-            x (dict): maps obs_group to obs_key to data of form [B=1, T=pad_frame_stack+1, D]
+        Update inputs for model by shifting history and inserting new observation.
 
-            obs (dict): maps obs_key to data of form [D]
+        Args: 
+            x (dict): maps obs_group to obs_key to
+              tensor of shape [B=1, T=pad_frame_stack+1, D] on @self.device
+
+            obs (dict): maps obs_key to data of shape [D]
 
             demo_id (str): id of the demo, e.g., demo_0
 
@@ -91,13 +97,15 @@ class RolloutEnv:
     
     def fetch_goal(self, demo_id, t):
         """
+        Get goal for specified demo and time.
+
         Args: 
             demo_id (str): id of the demo, e.g., demo_0
 
             t (int): timestep in trajectory
 
         Returns:
-            goal seq tensor of shape [B=1, T=validset.n_frame_stack+1, D]
+            goal seq tensor of shape [B=1, T=validset.n_frame_stack+1, D] on @self.device
         """
         return NotImplementedError
 
@@ -110,6 +118,8 @@ class RolloutEnv:
             terminate_on_success=False,
         ):
         """
+        Run rollout on a single demo and save stats (and video if necessary).
+
         Args:
             policy (RolloutPolicy instance): policy to use for rollouts
 
@@ -121,6 +131,10 @@ class RolloutEnv:
             video_skip (int): how often to write video frame
 
             terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
+
+        Returns:
+            results (dict): dictionary of results with the keys 
+            "Return", "Horizon", "Success_Rate", "{metric}_Success_Rate"
         """
         assert isinstance(policy, RolloutPolicy)
 
@@ -128,16 +142,21 @@ class RolloutEnv:
             self, 
             policy, 
             demo_id,
+            video_dir=None,
             video_writer=None,
             video_skip=5,
             terminate_on_success=False, 
             verbose=False,
         ):        
         """
+        Configure video writer, run rollout, and log progress. 
+
         Args:
             policy (RolloutPolicy instance): policy to use for rollouts
 
             demo_id (str): id of demo to rollout
+
+            video_dir (str): (optional) directory to save rollout videos
 
             video_writer (imageio Writer instance): if not None, use video writer object to append frames at 
                 rate given by @video_skip
@@ -147,5 +166,39 @@ class RolloutEnv:
             terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
 
             verbose (bool): if True, print results of each rollout
+
+        Returns:
+            results (dict): dictionary of results with the keys 
+            "Time", "Return", "Horizon", "Success_Rate", "{metric}_Success_Rate"
         """
         assert isinstance(policy, RolloutPolicy)
+
+        rollout_timestamp = time.time()
+
+        # create video writer
+        write_video = video_dir is not None
+        video_path = None
+        if write_video and video_writer is None:
+            video_str = f"{demo_id}.mp4"
+            video_path = os.path.join(video_dir, f"{video_str}")
+            video_writer = imageio.get_writer(video_path, fps=20)
+            print("video writes to " + video_path)
+        
+        rollout_info = self.run_rollout(
+            policy=policy, 
+            demo_id=demo_id, 
+            video_writer=video_writer, 
+            video_skip=video_skip, 
+            terminate_on_success=terminate_on_success, 
+        )
+        rollout_info["Time"] = time.time() - rollout_timestamp
+        if verbose:
+            horizon = rollout_info["Horizon"]
+            success = rollout_info["Success_Rate"]
+            print(f"demo={demo_id}, horizon={horizon}, success={success}")
+            print(json.dumps(rollout_info, sort_keys=True, indent=4))
+
+        if write_video:
+            video_writer.close()
+
+        return rollout_info

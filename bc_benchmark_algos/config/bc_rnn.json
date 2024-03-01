@@ -24,13 +24,13 @@
         "additional_envs": null,
         "render": false,
         "render_video": true,
-        "keep_all_videos": false,
+        "keep_all_videos": true,
         "video_skip": 5,
         "rollout": {
-            "enabled": false,
+            "enabled": true,
             "n": 50,
             "horizon": 400,
-            "rate": 50,
+            "rate": 100,
             "warmstart": 0,
             "terminate_on_success": true
         }

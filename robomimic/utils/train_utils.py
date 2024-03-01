@@ -391,7 +391,7 @@ def rollout_with_stats(
 
 
 def should_save_from_rollout_logs(
-        all_rollout_logs,
+        rollout_logs,
         best_return,
         best_success_rate,
         epoch_ckpt_name,
@@ -405,14 +405,12 @@ def should_save_from_rollout_logs(
     returns a dict with the updated statistics.
 
     Args:
-        all_rollout_logs (dict): dictionary of rollout results that should be consistent
+        rollout_logs (dict): rollout results that should be consistent
             with the output of @rollout_with_stats
 
-        best_return (dict): dictionary that stores the best average rollout return seen so far
-            during training, for each environment
+        best_return (float): best average rollout return seen so far during training
 
-        best_success_rate (dict): dictionary that stores the best average success rate seen so far
-            during training, for each environment
+        best_success_rate (float): best average success rate seen so far during training
 
         epoch_ckpt_name (str): what to name the checkpoint file - this name might be modified
             by this function
@@ -431,24 +429,22 @@ def should_save_from_rollout_logs(
     """
     should_save_ckpt = False
     ckpt_reason = None
-    for env_name in all_rollout_logs:
-        rollout_logs = all_rollout_logs[env_name]
 
-        if rollout_logs["Return"] > best_return[env_name]:
-            best_return[env_name] = rollout_logs["Return"]
-            if save_on_best_rollout_return:
-                # save checkpoint if achieve new best return
-                epoch_ckpt_name += "_{}_return_{}".format(env_name, best_return[env_name])
-                should_save_ckpt = True
-                ckpt_reason = "return"
+    if rollout_logs["Return"] > best_return:
+        best_return = rollout_logs["Return"]
+        if save_on_best_rollout_return:
+            # save checkpoint if achieve new best return
+            epoch_ckpt_name += "_return_{}".format(best_return)
+            should_save_ckpt = True
+            ckpt_reason = "return"
 
-        if rollout_logs["Success_Rate"] > best_success_rate[env_name]:
-            best_success_rate[env_name] = rollout_logs["Success_Rate"]
-            if save_on_best_rollout_success_rate:
-                # save checkpoint if achieve new best success rate
-                epoch_ckpt_name += "_{}_success_{}".format(env_name, best_success_rate[env_name])
-                should_save_ckpt = True
-                ckpt_reason = "success"
+    if rollout_logs["Success_Rate"] > best_success_rate:
+        best_success_rate = rollout_logs["Success_Rate"]
+        if save_on_best_rollout_success_rate:
+            # save checkpoint if achieve new best success rate
+            epoch_ckpt_name += "_success_{}".format(best_success_rate)
+            should_save_ckpt = True
+            ckpt_reason = "success"
 
     # return the modified input attributes
     return dict(

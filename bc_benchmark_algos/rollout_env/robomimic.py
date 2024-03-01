@@ -4,14 +4,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
-from robomimic.algo import RolloutPolicy
-import imageio
 import numpy as np
-import tqdm
-import os
-import time
-import json
-import torch
 
 
 class RobomimicRolloutEnv(RolloutEnv):
@@ -19,18 +12,17 @@ class RobomimicRolloutEnv(RolloutEnv):
     Class used to rollout policies in in Robomimic environments. 
     """
 
-    def __init__(self, config, validset, video_dir=None):
+    def __init__(self, config, validset):
         super(RobomimicRolloutEnv, self).__init__(
             config=config, 
             validset=validset, 
-            video_dir=video_dir
         )
         assert isinstance(self.validset, RobomimicDataset)
     
     def fetch_goal(self, demo_id, t):
         index = self.validset.demo_id_to_start_index[demo_id] + t
-        goal = TensorUtils.slice(x=self.validset[index]["goal"], dim=0, start=0, end=self.validset.n_frame_stack+1)
-        goal = TensorUtils.to_tensor(x=goal, device=self.device)
+        goal = TensorUtils.to_tensor(x=self.validset[index]["goal"], device=self.device)
+        goal = TensorUtils.slice(x=goal, dim=0, start=0, end=self.validset.n_frame_stack+1)
         goal = TensorUtils.to_batch(x=goal)
         return goal
         
@@ -59,7 +51,7 @@ class RobomimicRolloutEnv(RolloutEnv):
 
     def run_rollout(
             self, 
-            policy: RolloutPolicy, 
+            policy, 
             demo_id,
             video_writer=None,
             video_skip=5,
@@ -133,60 +125,6 @@ class RobomimicRolloutEnv(RolloutEnv):
                 results["{}_Success_Rate".format(k)] = float(success[k])
 
         return results
-        
-    def rollout_with_stats(
-            self, 
-            policy, 
-            demo_id,
-            video_writer=None,
-            video_skip=5,
-            terminate_on_success=False, 
-            verbose=False,
-        ):   
-        super(RobomimicRolloutEnv, self).rollout_with_stats(
-            policy=policy,
-            demo_id=demo_id,
-            video_writer=video_writer, 
-            video_skip=video_skip, 
-            terminate_on_success=terminate_on_success, 
-            verbose=verbose
-            )
-
-        rollout_logs = []
-        rollout_timestamp = time.time()
-
-        # create video writer
-        video_path = None
-        if self.write_video and video_writer is None:
-            video_str = f"{demo_id}.mp4"
-            video_path = os.path.join(self.video_dir, f"{video_str}")
-            video_writer = imageio.get_writer(video_path, fps=20)
-            print("video writes to " + video_path)
-        
-        rollout_info = self.run_rollout(
-            policy=policy, 
-            demo_id=demo_id, 
-            video_writer=video_writer, 
-            video_skip=video_skip, 
-            terminate_on_success=terminate_on_success, 
-        )
-        rollout_info["time"] = time.time() - rollout_timestamp
-        rollout_logs.append(rollout_info)
-        if verbose:
-            horizon = rollout_info["Horizon"]
-            num_success = rollout_info["Success_Rate"]
-            print(f"demo={demo_id}, horizon={horizon}, num_success={num_success}")
-            print(json.dumps(rollout_info, sort_keys=True, indent=4))
-
-        if self.write_video:
-            video_writer.close()
-
-        # average metric across all episodes
-        rollout_logs = dict((k, [rollout_logs[i][k] for i in range(len(rollout_logs))]) for k in rollout_logs[0])
-        rollout_logs_mean = dict((k, np.mean(v)) for k, v in rollout_logs.items())
-        rollout_logs_mean["Time_Episode"] = np.sum(rollout_logs["time"]) / 60. # total time taken for rollouts in minutes
-
-        return rollout_logs_mean, video_path
 
 
         
