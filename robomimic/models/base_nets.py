@@ -496,6 +496,7 @@ class ResNet18Conv(ConvBase):
         input_channel=3,
         pretrained=False,
         input_coord_conv=False,
+        freeze=True,
     ):
         """
         Args:
@@ -505,6 +506,7 @@ class ResNet18Conv(ConvBase):
             pretrained (bool): if True, load pretrained weights for all ResNet layers.
             input_coord_conv (bool): if True, use a coordinate convolution for the first layer
                 (a convolution where input channels are modified to encode spatial pixel location)
+            freeze (bool): if True, use a frozen R3M pretrained model.
         """
         super(ResNet18Conv, self).__init__()
         net = vision_models.resnet18(pretrained=pretrained)
@@ -518,6 +520,10 @@ class ResNet18Conv(ConvBase):
         self._input_coord_conv = input_coord_conv
         self._input_channel = input_channel
         self.nets = torch.nn.Sequential(*(list(net.children())[:-2]))
+
+        if freeze:
+            for param in self.nets.parameters():
+                param.requires_grad = False
 
     def output_shape(self, input_shape):
         """
