@@ -440,10 +440,10 @@ def load_train_val_data(config):
         )
         assert set(train_demo_keys).isdisjoint(set(valid_demo_keys)), "training demonstrations overlap with " \
             "validation demonstrations!"
-        trainset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS[config.algo_name], filter_by_attribute=train_filter_by_attribute)
-        validset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS[config.algo_name], filter_by_attribute=valid_filter_by_attribute)
+        trainset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS, filter_by_attribute=train_filter_by_attribute)
+        validset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS, filter_by_attribute=valid_filter_by_attribute)
     else:
-        trainset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS[config.algo_name], filter_by_attribute=train_filter_by_attribute)
+        trainset = RobomimicDataset.dataset_factory(config=config, obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS, filter_by_attribute=train_filter_by_attribute)
     
     train_sampler = trainset.get_dataset_sampler()
     if validset is not None:

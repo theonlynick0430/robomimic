@@ -21,7 +21,7 @@ class RobomimicRolloutEnv(RolloutEnv):
     
     def fetch_goal(self, demo_id, t):
         index = self.validset.demo_id_to_start_index[demo_id] + t
-        goal = TensorUtils.to_tensor(x=self.validset[index]["goal"], device=self.device)
+        goal = self.validset[index]["goal"]
         goal = TensorUtils.slice(x=goal, dim=0, start=0, end=self.validset.n_frame_stack+1)
         goal = TensorUtils.to_batch(x=goal)
         return goal
@@ -37,17 +37,19 @@ class RobomimicRolloutEnv(RolloutEnv):
             self.env_meta["env_name"] = self.config.experiment.env
             print("=" * 30 + "\n" + "Replacing Env to {}\n".format(self.env_meta["env_name"]) + "=" * 30)
 
-        self.env_name = self.env_meta["env_name"]
-
         # create environment for validation run
-        self.env = EnvUtils.create_env_from_metadata(
-                env_meta=self.env_meta,
-                env_name=self.env_name, 
-                render=False, 
-                render_offscreen=self.config.experiment.render_video,
-                use_image_obs=ObsUtils.has_modality("rgb", self.config.all_obs_keys),
-                use_depth_obs=ObsUtils.has_modality("depth", self.config.all_obs_keys),
-            )
+        env_type = EnvUtils.get_env_type(env_meta=self.env_meta)
+        self.env = EnvUtils.create_env(
+            env_type=env_type,
+            env_name=self.env_meta["env_name"],  
+            render=False, 
+            render_offscreen=self.config.experiment.render_video, 
+            use_image_obs=ObsUtils.has_modality("rgb", self.config.all_obs_keys), 
+            use_depth_obs=ObsUtils.has_modality("depth", self.config.all_obs_keys), 
+            postprocess_visual_obs=False, # ensure shape from obs and dataset are the same
+            **self.env_meta["env_kwargs"],
+        )
+        EnvUtils.check_env_version(self.env, self.env_meta)
 
     def run_rollout(
             self, 

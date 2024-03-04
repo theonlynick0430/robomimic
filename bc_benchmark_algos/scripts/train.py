@@ -92,7 +92,7 @@ def train(args):
     model = algo_factory(
         algo_name=config.algo_name,
         config=config,
-        obs_key_shapes=ObsUtils.OBS_SHAPES[config.algo_name],
+        obs_key_shapes=ObsUtils.OBS_SHAPES,
         ac_dim=ac_dim,
         device=device,
     )

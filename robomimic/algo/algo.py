@@ -467,12 +467,14 @@ class RolloutPolicy(object):
 
         Args:
             inputs (dict): nested dictionary that maps obs_group to obs_keys to 
-            tensors of form [B, T, D]
+            np.array of shape [B, T, D]
         """
-        inputs = TensorUtils.to_float(TensorUtils.to_device(inputs, self.policy.device))
+        inputs = TensorUtils.to_tensor(x=inputs, device=self.policy.device)
+        inputs = TensorUtils.to_float(x=inputs)
+        inputs = ObsUtils.process_inputs(**inputs)
         if self.obs_normalization_stats is not None:
             # ensure obs_normalization_stats are torch Tensors on proper device
-            obs_normalization_stats = TensorUtils.to_float(TensorUtils.to_device(TensorUtils.to_tensor(self.obs_normalization_stats), self.policy.device))
+            obs_normalization_stats = TensorUtils.to_float(TensorUtils.to_tensor(x=self.obs_normalization_stats, device=self.policy.device))
             for obs_group in inputs:
                 inputs[obs_group] = ObsUtils.normalize_obs(inputs[obs_group], obs_normalization_stats=obs_normalization_stats)
         return inputs
@@ -487,7 +489,7 @@ class RolloutPolicy(object):
 
         Args:
             inputs (dict): nested dictionary that maps obs_group to obs_keys to 
-            tensors of form [B, T, D]
+            tensors of shape [B, T, D]
         """
         inputs = self._prepare_observation(**inputs)
         ac = self.policy.get_action(obs_dict=inputs["obs"], goal_dict=inputs["goal"])

@@ -25,7 +25,6 @@ class RolloutEnv:
         """
         self.config = config
         self.validset = validset
-        self.device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
 
         assert isinstance(self.validset, MIMO_Dataset)
         assert self.validset.pad_frame_stack and self.validset.pad_seq_length, "validation set must pad frame stack and seq"
@@ -49,24 +48,23 @@ class RolloutEnv:
 
         Returns:
             x (dict): maps obs_group to obs_key to
-                tensor of shape [B=1, T=pad_frame_stack+1, D] on @self.device
+                np.array of shape [B=1, T=pad_frame_stack+1, D]
         """
         x = dict()
         # populate input with first obs and goal
-        if len(ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]) > 0:
+        if len(ObsUtils.OBS_GROUP_TO_KEYS["obs"]) > 0:
             x["obs"] = dict()
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]:
+        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS["obs"]:
             assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
             x["obs"][obs_key] = obs[obs_key]
         # add batch, seq dim
-        x = TensorUtils.to_tensor(x, device=self.device)
         x = TensorUtils.to_batch(x)
         x = TensorUtils.to_sequence(x)
         # repeat along seq dim n_frame_stack+1 times to prepare history
         x = TensorUtils.repeat_seq(x=x, k=self.validset.n_frame_stack+1)
         # fetch initial goal
         x["goal"] = self.fetch_goal(demo_id=demo_id, t=0)
-        return ObsUtils.process_inputs(**x)
+        return x
     
     def inputs_from_new_obs(self, x, obs, demo_id, t):
         """
@@ -74,7 +72,7 @@ class RolloutEnv:
 
         Args: 
             x (dict): maps obs_group to obs_key to
-              tensor of shape [B=1, T=pad_frame_stack+1, D] on @self.device
+              np.array of shape [B=1, T=pad_frame_stack+1, D]
 
             obs (dict): maps obs_key to data of shape [D]
 
@@ -87,12 +85,12 @@ class RolloutEnv:
         """
         # update input using new obs
         x = TensorUtils.shift_seq(x=x, k=-1)
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS[self.config.algo_name]["obs"]:
+        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS["obs"]:
             assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
             # only update last seq index to preserve history
-            x["obs"][obs_key][:, -1, :] = ObsUtils.process_obs(obs=torch.Tensor(obs[obs_key], device=self.device), obs_key=obs_key)
+            x["obs"][obs_key][:, -1, :] = obs[obs_key]
         # fetch new goal
-        x["goal"] = ObsUtils.process_obs_dict(obs_dict=self.fetch_goal(demo_id=demo_id, t=t))
+        x["goal"] = self.fetch_goal(demo_id=demo_id, t=t)
         return x
     
     def fetch_goal(self, demo_id, t):
@@ -105,7 +103,7 @@ class RolloutEnv:
             t (int): timestep in trajectory
 
         Returns:
-            goal seq tensor of shape [B=1, T=validset.n_frame_stack+1, D] on @self.device
+            goal seq np.array of shape [B=1, T=validset.n_frame_stack+1, D]
         """
         return NotImplementedError
 

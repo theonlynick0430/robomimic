@@ -470,15 +470,17 @@ class EnvRobosuite(EB.EnvBase):
             assert len(image_modalities) == 1
             image_modalities = ["image"]
             depth_modalities = ["depth"]
-        obs_modality_specs = {
+        obs_modality_spec = {
             "obs": {
                 "low_dim": [], # technically unused, so we don't have to specify all of them
                 "rgb": image_modalities,
             }
         }
+        obs_shape_spec = {obs_key: [camera_height, camera_width, 3] for obs_key in image_modalities}
         if use_depth_obs:
-            obs_modality_specs["obs"]["depth"] = depth_modalities
-        ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
+            obs_modality_spec["obs"]["depth"] = depth_modalities
+            obs_shape_spec.update({obs_key: [camera_height, camera_width, 1] for obs_key in depth_modalities})
+        ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_spec, obs_shape_spec=obs_shape_spec)
 
         # note that @postprocess_visual_obs is False since this env's images will be written to a dataset
         return cls(

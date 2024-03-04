@@ -2,7 +2,7 @@
 from robosuite.utils.input_utils import *
 from robosuite.utils.transform_utils import quat2mat, mat2quat, quat2axisangle
 import numpy as np
-import bc_benchmark_algos.custom_env.utils as suite
+import robosuite as suite
 
 
 GRIPPER_CLOSED = 1

@@ -234,13 +234,13 @@ class EnvGym(EB.EnvBase):
 
         # make sure to initialize obs utils so it knows which modalities are image modalities.
         # For currently supported gym tasks, there are no image observations.
-        obs_modality_specs = {
+        obs_modality_spec = {
             "obs": {
-                "low_dim": ["flat"],
+                "low_dim": [],
                 "rgb": [],
             }
         }
-        ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
+        ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs=obs_modality_spec, obs_shape_specs={})
 
         return cls(env_name=env_name, **kwargs)
 

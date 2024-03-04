@@ -169,7 +169,7 @@ def create_env(
             observations are not required.
     """
 
-    # note: pass @postprocess_visual_obs True, to make sure images are processed for network inputs
+    # note: by default @postprocess_visual_obs is True, to make sure images are processed for network inputs
     env_class = get_env_class(env_type=env_type)
     env = env_class(
         env_name=env_name, 
@@ -177,7 +177,6 @@ def create_env(
         render_offscreen=render_offscreen, 
         use_image_obs=use_image_obs,
         use_depth_obs=use_depth_obs,
-        postprocess_visual_obs=True,
         **kwargs,
     )
     print("Created environment with name {}".format(env_name))
