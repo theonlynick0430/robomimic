@@ -371,19 +371,6 @@ def process_obs_dict(obs_dict):
     return { k : process_obs(obs=obs, obs_key=k) for k, obs in obs_dict.items() } # shallow copy
 
 
-def process_inputs(**inputs):
-    """
-    Process @inputs dictionary to prepare for network input.
-
-    Args:
-        inputs (dict): dictionary mapping obs_group to obs_keys to data.
-
-    Returns:
-        new_dict (dict): dictionary where observation keys have been processed by their corresponding processors
-    """
-    return { obs_group : process_obs_dict(obs_dict=obs_keys) for obs_group, obs_keys in inputs.items() }
-
-
 def process_frame(frame, channel_dim, scale):
     """
     Given frame fetched from dataset, process for network input. Converts array

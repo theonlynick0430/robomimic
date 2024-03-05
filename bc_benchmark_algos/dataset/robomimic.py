@@ -74,6 +74,9 @@ class RobomimicDataset(MIMO_Dataset):
             num_subgoal=num_subgoal
             )
         
+        if self.pad_seq_length or self.pad_frame_stack:
+            assert self.hdf5_cache_mode == "all", "must cache if padding required for HDF5 datasets"
+        
         # maybe prepare for observation normalization
         self.obs_normalization_stats = None
         if self.hdf5_normalize_obs:

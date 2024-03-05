@@ -93,35 +93,13 @@ class BC(PolicyAlgo):
         )
         self.nets = self.nets.float().to(self.device)
 
-    def process_batch_for_training(self, batch):
-        """
-        Processes input batch from a data loader to filter out
-        relevant information and prepare the batch for training.
-
-        Args:
-            batch (dict): dictionary with torch.Tensors sampled
-                from a data loader
-
-        Returns:
-            input_batch (dict): processed and filtered batch that
-                will be used for training 
-        """
-        input_batch = dict()
-        input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
-        input_batch["goal"] = batch.get("goal", None) # goals may not be present
-        input_batch["actions"] = batch["actions"][:, 0, :]
-        # we move to device first before float conversion because image observation modalities will be uint8 -
-        # this minimizes the amount of data transferred to GPU
-        return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
-
-
     def train_on_batch(self, batch, epoch, validate=False):
         """
         Training on a single batch of data.
 
         Args:
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
 
             epoch (int): epoch number - required by some Algos that need
                 to perform staged training and early stopping
@@ -153,7 +131,7 @@ class BC(PolicyAlgo):
 
         Args:
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
 
         Returns:
             predictions (dict): dictionary containing network outputs
@@ -171,7 +149,7 @@ class BC(PolicyAlgo):
         Args:
             predictions (dict): dictionary containing network outputs, from @_forward_training
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
 
         Returns:
             losses (dict): dictionary of losses computed over the batch
@@ -504,35 +482,15 @@ class BC_RNN(BC):
 
         self.nets = self.nets.float().to(self.device)
 
-    def process_batch_for_training(self, batch):
-        """
-        Processes input batch from a data loader to filter out
-        relevant information and prepare the batch for training.
-
-        Args:
-            batch (dict): dictionary with torch.Tensors sampled
-                from a data loader
-
-        Returns:
-            input_batch (dict): processed and filtered batch that
-                will be used for training
-        """
-        input_batch = dict()
-        input_batch["obs"] = batch["obs"]
-        input_batch["goal"] = batch.get("goal", None) # goals may not be present
-        input_batch["actions"] = batch["actions"]
-
+    def prepare_inputs(self, obs_normalization_stats=None, **inputs):
+        inputs = super(BC_RNN, self).prepare_inputs(obs_normalization_stats=obs_normalization_stats, **inputs)
         if self._rnn_is_open_loop:
             # replace the observation sequence with one that only consists of the first observation.
             # This way, all actions are predicted "open-loop" after the first observation, based
             # on the rnn hidden state.
-            n_steps = batch["actions"].shape[1]
-            obs_seq_start = TensorUtils.index_at_time(batch["obs"], ind=0)
-            input_batch["obs"] = TensorUtils.unsqueeze_expand_at(obs_seq_start, size=n_steps, dim=1)
-
-        # we move to device first before float conversion because image observation modalities will be uint8 -
-        # this minimizes the amount of data transferred to GPU
-        return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
+            obs_seq_start = TensorUtils.index_at_time(inputs["obs"], ind=0)
+            inputs["obs"] = TensorUtils.unsqueeze_expand_at(obs_seq_start, size=self.global_config.train.frame_stack+1, dim=1)
+        return inputs
 
     def get_action(self, obs_dict, goal_dict=None):
         """
@@ -617,7 +575,7 @@ class BC_RNN_GMM(BC_RNN):
 
         Args:
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
 
         Returns:
             predictions (dict): dictionary containing network outputs
@@ -645,7 +603,7 @@ class BC_RNN_GMM(BC_RNN):
         Args:
             predictions (dict): dictionary containing network outputs, from @_forward_training
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
 
         Returns:
             losses (dict): dictionary of losses computed over the batch
@@ -686,6 +644,7 @@ class BC_Transformer(BC):
         Creates networks and places them into @self.nets.
         """
         assert self.algo_config.transformer.enabled
+        assert self.algo_config.transformer.context_length == self.global_config.train.frame_stack+1, "context_length should be same as frame_stack+1"
 
         self.nets = nn.ModuleDict()
         self.nets["policy"] = PolicyNets.TransformerActorNetwork(
@@ -706,31 +665,12 @@ class BC_Transformer(BC):
         self.context_length = self.algo_config.transformer.context_length
         self.supervise_all_steps = self.algo_config.transformer.supervise_all_steps
 
-    def process_batch_for_training(self, batch):
-        """
-        Processes input batch from a data loader to filter out
-        relevant information and prepare the batch for training.
-        Args:
-            batch (dict): dictionary with torch.Tensors sampled
-                from a data loader
-        Returns:
-            input_batch (dict): processed and filtered batch that
-                will be used for training
-        """
-        input_batch = dict()
-        h = self.context_length
-        input_batch["obs"] = {k: batch["obs"][k][:, :h, :] for k in batch["obs"]}
-        input_batch["goal"] = batch.get("goal", None) # goals may not be present
-
-        if self.supervise_all_steps:
-            # supervision on entire sequence (instead of just current timestep)
-            input_batch["actions"] = batch["actions"][:, :h, :]
-        else:
-            # just use current timestep
-            input_batch["actions"] = batch["actions"][:, h-1, :]
-
-        input_batch = TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
-        return input_batch
+    def prepare_inputs(self, obs_normalization_stats=None, **inputs):
+        inputs = super(BC_Transformer, self).prepare_inputs(obs_normalization_stats=obs_normalization_stats, **inputs)
+        if "actions" in inputs.keys():
+            if not self.supervise_all_steps:
+                inputs["actions"] = inputs["actions"][:, self.context_length-1, :]
+        return inputs
 
     def _forward_training(self, batch, epoch=None):
         """
@@ -739,7 +679,7 @@ class BC_Transformer(BC):
 
         Args:
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
 
         Returns:
             predictions (dict): dictionary containing network outputs
@@ -769,8 +709,7 @@ class BC_Transformer(BC):
             action (torch.Tensor): action tensor
         """
         assert not self.nets.training
-
-        return self.nets["policy"](obs_dict, actions=None, goal_dict=goal_dict)[:, -1, :]
+        return self.nets["policy"](obs_dict, actions=None, goal_dict=goal_dict)
 
 
 class BC_Transformer_GMM(BC_Transformer):
@@ -850,7 +789,7 @@ class BC_Transformer_GMM(BC_Transformer):
         Args:
             predictions (dict): dictionary containing network outputs, from @_forward_training
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
+                from a data loader and prepared by @prepare_inputs
         Returns:
             losses (dict): dictionary of losses computed over the batch
         """

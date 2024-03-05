@@ -192,6 +192,7 @@ def train(args):
                     demo_id=demo_id,
                     video_dir=rollout_dir if config.experiment.render_video else None,
                     video_skip=config.experiment.get("video_skip", 5),
+                    horizon=config.experiment.rollout.horizon,
                     terminate_on_success=config.experiment.rollout.terminate_on_success,
                 )
                 rollout_logs.append(rollout_info)

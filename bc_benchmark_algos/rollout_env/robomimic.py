@@ -20,6 +20,12 @@ class RobomimicRolloutEnv(RolloutEnv):
         assert isinstance(self.validset, RobomimicDataset)
     
     def fetch_goal(self, demo_id, t):
+        if not self.gc:
+            return None
+        demo_length = self.validset.get_demo_len(demo_id=demo_id)
+        if t >= demo_length:
+            # reuse last goal
+            t = demo_length-1
         index = self.validset.demo_id_to_start_index[demo_id] + t
         goal = self.validset[index]["goal"]
         goal = TensorUtils.slice(x=goal, dim=0, start=0, end=self.validset.n_frame_stack+1)
@@ -57,6 +63,7 @@ class RobomimicRolloutEnv(RolloutEnv):
             demo_id,
             video_writer=None,
             video_skip=5,
+            horizon=None,
             terminate_on_success=False
         ):
         super(RobomimicRolloutEnv, self).run_rollout(
@@ -64,10 +71,12 @@ class RobomimicRolloutEnv(RolloutEnv):
             demo_id=demo_id,
             video_writer=video_writer, 
             video_skip=video_skip, 
+            horizon=horizon,
             terminate_on_success=terminate_on_success
             )
         
-        demo_len = self.validset.demo_id_to_demo_length[demo_id]
+        demo_len = self.validset.get_demo_len(demo_id=demo_id)
+        horizon = demo_len if horizon is None else horizon
         demo_index = self.validset.demo_id_to_start_index[demo_id]
         
         policy.start_episode()
@@ -86,7 +95,7 @@ class RobomimicRolloutEnv(RolloutEnv):
         total_reward = 0.
         success = { k: False for k in self.env.is_success() } # success metrics
         try:
-            for step_i in range(demo_len):
+            for step_i in range(horizon):
                 # compute new inputs
                 inputs = self.inputs_from_new_obs(x=inputs, obs=obs, demo_id=demo_id, t=demo_index+step_i)
 

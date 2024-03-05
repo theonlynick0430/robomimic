@@ -25,6 +25,7 @@ class RolloutEnv:
         """
         self.config = config
         self.validset = validset
+        self.gc = self.config.train.goal_mode in ["last", "subgoal"]
 
         assert isinstance(self.validset, MIMO_Dataset)
         assert self.validset.pad_frame_stack and self.validset.pad_seq_length, "validation set must pad frame stack and seq"
@@ -95,7 +96,7 @@ class RolloutEnv:
     
     def fetch_goal(self, demo_id, t):
         """
-        Get goal for specified demo and time.
+        Get goal for specified demo and time if goal-conditioned.
 
         Args: 
             demo_id (str): id of the demo, e.g., demo_0
@@ -113,6 +114,7 @@ class RolloutEnv:
             demo_id,
             video_writer=None,
             video_skip=5,
+            horizon=None,
             terminate_on_success=False,
         ):
         """
@@ -127,6 +129,8 @@ class RolloutEnv:
                 rate given by @video_skip
 
             video_skip (int): how often to write video frame
+
+            horizon (int): horizon of rollout episode. If None, use demo length instead.
 
             terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
 
@@ -143,6 +147,7 @@ class RolloutEnv:
             video_dir=None,
             video_writer=None,
             video_skip=5,
+            horizon=None,
             terminate_on_success=False, 
             verbose=False,
         ):        
@@ -160,6 +165,8 @@ class RolloutEnv:
                 rate given by @video_skip
 
             video_skip (int): how often to write video frame
+
+            horizon (int): horizon of rollout episode. If None, use demo length instead.
 
             terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
 
@@ -187,6 +194,7 @@ class RolloutEnv:
             demo_id=demo_id, 
             video_writer=video_writer, 
             video_skip=video_skip, 
+            horizon=horizon,
             terminate_on_success=terminate_on_success, 
         )
         rollout_info["Time"] = time.time() - rollout_timestamp

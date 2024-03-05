@@ -29,7 +29,7 @@
         "rollout": {
             "enabled": true,
             "n": 50,
-            "horizon": 400,
+            "horizon": 75,
             "rate": 100,
             "warmstart": 0,
             "terminate_on_success": true
@@ -47,7 +47,7 @@
         "hdf5_validation_filter_key": "valid",
         "seq_length": 1,
         "pad_seq_length": true,
-        "frame_stack": 10,
+        "frame_stack": 9,
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions",
@@ -149,7 +149,7 @@
         },
         "transformer": {
             "enabled": true,
-            "context_length": 11,
+            "context_length": 10,
             "embed_dim": 512,
             "num_layers": 6,
             "num_heads": 8,
