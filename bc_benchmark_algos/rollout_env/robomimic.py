@@ -4,20 +4,54 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
-import numpy as np
 
 
 class RobomimicRolloutEnv(RolloutEnv):
     """
-    Class used to rollout policies in in Robomimic environments. 
+    Class used to rollout policies in Robomimic environments. 
     """
 
-    def __init__(self, config, validset):
+    def __init__(
+            self,  
+            validset,
+            obs_group_to_keys,
+            all_obs_keys,
+            goal_mode=None,
+            render_video=False,
+            ):
         super(RobomimicRolloutEnv, self).__init__(
-            config=config, 
             validset=validset, 
+            obs_group_to_keys=obs_group_to_keys, 
+            all_obs_keys=all_obs_keys,
+            goal_mode=goal_mode,
+            render_video=render_video
         )
         assert isinstance(self.validset, RobomimicDataset)
+
+    @classmethod
+    def factory(cls, config, validset, obs_group_to_keys):
+        """
+        Create a RobomimicRolloutEnv instance from config.
+
+        Args:
+            config (BaseConfig instance): config object
+
+            validset (Dataset instance): validation dataset
+
+            obs_group_to_keys (dict): dictionary from observation group to observation keys
+
+        Returns:
+            rollout_env (RobomimicRolloutEnv instance)
+        """
+        re_kwargs = dict(
+            validset=validset,
+            obs_group_to_keys=obs_group_to_keys,
+            all_obs_keys=config.all_obs_keys,
+            goal_mode=config.train.goal_mode,
+            render_video=config.experiment.render_video,
+        )
+        rollout_env = cls(**re_kwargs)
+        return rollout_env
     
     def fetch_goal(self, demo_id, t):
         if not self.gc:
@@ -37,11 +71,7 @@ class RobomimicRolloutEnv(RolloutEnv):
         Create environment associated with dataset.
         """
         # load env metadata from training file
-        self.env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=self.config.train.data)
-
-        if self.config.experiment.env is not None:
-            self.env_meta["env_name"] = self.config.experiment.env
-            print("=" * 30 + "\n" + "Replacing Env to {}\n".format(self.env_meta["env_name"]) + "=" * 30)
+        self.env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=self.validset.hdf5_path)
 
         # create environment for validation run
         env_type = EnvUtils.get_env_type(env_meta=self.env_meta)
@@ -49,9 +79,9 @@ class RobomimicRolloutEnv(RolloutEnv):
             env_type=env_type,
             env_name=self.env_meta["env_name"],  
             render=False, 
-            render_offscreen=self.config.experiment.render_video, 
-            use_image_obs=ObsUtils.has_modality("rgb", self.config.all_obs_keys), 
-            use_depth_obs=ObsUtils.has_modality("depth", self.config.all_obs_keys), 
+            render_offscreen=self.render_video, 
+            use_image_obs=ObsUtils.has_modality("rgb", self.all_obs_keys), 
+            use_depth_obs=ObsUtils.has_modality("depth", self.all_obs_keys), 
             postprocess_visual_obs=False, # ensure shape from obs and dataset are the same
             **self.env_meta["env_kwargs"],
         )

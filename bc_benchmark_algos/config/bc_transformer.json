@@ -1,13 +1,13 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "inv_dyn_rnn_square_peg_insertion",
+        "name": "bct",
         "validate": true,
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
             "log_wandb": true,
-            "wandb_proj_name": "inv_dyn_rnn_square_peg_insertion"
+            "wandb_proj_name": "bct"
         },
         "save": {
             "enabled": true,
@@ -29,7 +29,7 @@
         "rollout": {
             "enabled": true,
             "n": 50,
-            "horizon": 75,
+            "horizon": 100,
             "rate": 100,
             "warmstart": 0,
             "terminate_on_success": true

@@ -1,33 +1,45 @@
-from bc_benchmark_algos.dataset.dataset import MIMO_Dataset
+from bc_benchmark_algos.dataset.dataset import MIMODataset
 import robomimic.utils.tensor_utils as TensorUtils
-import robomimic.utils.obs_utils as ObsUtils
-import robomimic.utils.torch_utils as TorchUtils
 from robomimic.algo import RolloutPolicy
-import torch
 import imageio
 import time
 import json
-import numpy as np
 import os
 
 
 class RolloutEnv:
     """
-    Abstract class used to rollout policies in different environments. 
+    Abstract class used to rollout policie. Inherit from this class for 
+    different environments. 
     """
 
-    def __init__(self, config, validset):
+    def __init__(
+            self,  
+            validset,
+            obs_group_to_keys,
+            all_obs_keys,
+            goal_mode=None,
+            render_video=False
+            ):
         """
         Args:
-            config (BaseConfig instance): config object
-
             validset (Dataset instance): validation dataset
-        """
-        self.config = config
-        self.validset = validset
-        self.gc = self.config.train.goal_mode in ["last", "subgoal"]
 
-        assert isinstance(self.validset, MIMO_Dataset)
+            obs_group_to_keys (dict): dictionary from observation group to observation keys
+
+            all_obs_keys (array): all observation keys used in inference
+
+            goal_mode (str): either "last", "subgoal", or None. Defaults to None, which is to not fetch goals
+
+            render_video (bool): whether to render rollout on screen
+        """
+        self.validset = validset
+        self.obs_group_to_keys = obs_group_to_keys
+        self.all_obs_keys = all_obs_keys
+        self.gc = goal_mode in ["last", "subgoal"]
+        self.render_video = render_video
+
+        assert isinstance(self.validset, MIMODataset)
         assert self.validset.pad_frame_stack and self.validset.pad_seq_length, "validation set must pad frame stack and seq"
 
         self.create_env()
@@ -53,9 +65,9 @@ class RolloutEnv:
         """
         x = dict()
         # populate input with first obs and goal
-        if len(ObsUtils.OBS_GROUP_TO_KEYS["obs"]) > 0:
+        if len(self.obs_group_to_keys["obs"]) > 0:
             x["obs"] = dict()
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS["obs"]:
+        for obs_key in self.obs_group_to_keys["obs"]:
             assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
             x["obs"][obs_key] = obs[obs_key]
         # add batch, seq dim
@@ -86,7 +98,7 @@ class RolloutEnv:
         """
         # update input using new obs
         x = TensorUtils.shift_seq(x=x, k=-1)
-        for obs_key in ObsUtils.OBS_GROUP_TO_KEYS["obs"]:
+        for obs_key in self.obs_group_to_keys["obs"]:
             assert obs_key in obs, f"could not find obs_key {obs_key} in obs from environment"
             # only update last seq index to preserve history
             x["obs"][obs_key][:, -1, :] = obs[obs_key]

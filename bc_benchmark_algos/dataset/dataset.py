@@ -7,7 +7,13 @@ import torch.utils.data
 import robomimic.utils.tensor_utils as TensorUtils
 
 
-class MIMO_Dataset(torch.utils.data.Dataset):
+class MIMODataset(torch.utils.data.Dataset):
+    """
+    Abstract class for fetching sequences of experience. Inherit from this class for 
+    different dataset formats. 
+    Length of the fetched sequence is equal to (@frame_stack + @seq_length)
+    """
+
     def __init__(
         self,
         obs_group_to_keys,
@@ -21,13 +27,8 @@ class MIMO_Dataset(torch.utils.data.Dataset):
         num_subgoal=None,
     ):
         """
-        Abstract class for fetching sequences of experience. Inherit from this class for 
-        different dataset formats. 
-        Length of the fetched sequence is equal to (@frame_stack + @seq_length)
-
         Args:
-            obs_group_to_keys (dict(iterable)): dictionary that maps observation group (obs, goal etc) to 
-              observation keys (image, proprio, etc) to be fetched from the dataset
+            obs_group_to_keys (dict): dictionary from observation group to observation keys
 
             dataset_keys (tuple, list): keys to dataset items (actions, rewards, etc) to be fetched from the dataset.
 

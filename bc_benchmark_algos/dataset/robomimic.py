@@ -2,7 +2,7 @@
 This file contains Dataset classes that are used by torch dataloaders
 to fetch batches from hdf5 files.
 """
-from bc_benchmark_algos.dataset.dataset import MIMO_Dataset
+from bc_benchmark_algos.dataset.dataset import MIMODataset
 import os
 import h5py
 import numpy as np
@@ -14,7 +14,11 @@ import robomimic.utils.file_utils as FileUtils
 from torch.utils.data import DataLoader
 
 
-class RobomimicDataset(MIMO_Dataset):
+class RobomimicDataset(MIMODataset):
+    """
+    Class for fetching sequences of experience from Robomimic dataset.
+    """
+
     def __init__(
         self,
         hdf5_path,
@@ -115,20 +119,21 @@ class RobomimicDataset(MIMO_Dataset):
         self.close_and_delete_hdf5_handle()
 
     @classmethod
-    def dataset_factory(cls, config, obs_group_to_keys, filter_by_attribute=None):
+    def factory(cls, config, obs_group_to_keys, filter_by_attribute=None):
         """
         Create a RobomimicDataset instance from config.
 
         Args:
             config (BaseConfig instance): config object
 
-            obs_group_to_keys (dict): dictionary from observation group to observation keys
+            obs_group_to_keys (dict(iterable)): dictionary that maps observation group (obs, goal etc) to 
+              observation keys (image, proprio, etc) to be fetched from the dataset
 
             filter_by_attribute (str): if provided, use the provided filter key
                 to select a subset of demonstration trajectories to load
 
         Returns:
-            dataset (RobomimicDataset instance): dataset object
+            dataset (RobomimicDataset instance)
         """
         ds_kwargs = dict(
             hdf5_path=config.train.data,
