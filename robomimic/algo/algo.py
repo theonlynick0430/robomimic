@@ -187,9 +187,8 @@ class Algo(object):
                 inputs[obs_group] = ObsUtils.process_obs_dict(obs_dict=inputs[obs_group])
                 if obs_normalization_stats is not None:
                     inputs[obs_group] = ObsUtils.normalize_obs(obs_dict=inputs[obs_group], obs_normalization_stats=obs_normalization_stats)
-        for obs_group in ObsUtils.OBS_GROUP_TO_KEYS.keys():
-            if obs_group not in inputs.keys():
-                inputs[obs_group] = None
+        if "goal" not in inputs:
+            inputs["goal"] = None
         return inputs
 
     def train_on_batch(self, batch, epoch, validate=False):
