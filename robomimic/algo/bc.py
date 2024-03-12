@@ -470,6 +470,7 @@ class BC_RNN(BC):
             obs_shapes=self.obs_shapes,
             goal_shapes=self.goal_shapes,
             ac_dim=self.ac_dim,
+            seq_len=self.seq_len,
             mlp_layer_dims=self.algo_config.actor_layer_dims,
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
             **BaseNets.rnn_args_from_config(self.algo_config.rnn),
@@ -478,19 +479,22 @@ class BC_RNN(BC):
         self._rnn_hidden_state = None
         self._rnn_horizon = self.algo_config.rnn.horizon
         self._rnn_counter = 0
-        self._rnn_is_open_loop = self.algo_config.rnn.get("open_loop", False)
 
         self.nets = self.nets.float().to(self.device)
 
     def prepare_inputs(self, obs_normalization_stats=None, **inputs):
-        inputs = super(BC_RNN, self).prepare_inputs(obs_normalization_stats=obs_normalization_stats, **inputs)
-        if self._rnn_is_open_loop:
-            # replace the observation sequence with one that only consists of the first observation.
-            # This way, all actions are predicted "open-loop" after the first observation, based
-            # on the rnn hidden state.
-            obs_seq_start = TensorUtils.index_at_time(inputs["obs"], ind=0)
-            inputs["obs"] = TensorUtils.unsqueeze_expand_at(obs_seq_start, size=self.global_config.train.frame_stack+1, dim=1)
-        return inputs
+        """
+        Batch has sequence (s_t-frame_stack, ..., s_t-1, s_t, s_t+1, .., s_t+seq_len-1).
+        We want to input (s_t-frame_stack, ..., s_t-1, s_t) and output (a_t, a_t+1, .., a_t+seq_len-1).
+        Modify the batch accordingly.
+        """
+        actions = None
+        if "actions" in inputs:
+            actions = TensorUtils.slice(x=inputs["actions"], dim=1, start=self.frame_stack, end=self.frame_stack+self.seq_len)
+        inputs["actions"] = None
+        inputs = TensorUtils.slice(x=inputs, dim=1, start=0, end=self.frame_stack+1)
+        inputs["actions"] = actions
+        return super(BC_RNN, self).prepare_inputs(obs_normalization_stats=obs_normalization_stats, **inputs)
 
     def get_action(self, obs_dict, goal_dict=None):
         """
@@ -509,19 +513,9 @@ class BC_RNN(BC):
             batch_size = list(obs_dict.values())[0].shape[0]
             self._rnn_hidden_state = self.nets["policy"].get_rnn_init_state(batch_size=batch_size, device=self.device)
 
-            if self._rnn_is_open_loop:
-                # remember the initial observation, and use it instead of the current observation
-                # for open-loop action sequence prediction
-                self._open_loop_obs = TensorUtils.clone(TensorUtils.detach(obs_dict))
-
-        obs_to_use = obs_dict
-        if self._rnn_is_open_loop:
-            # replace current obs with last recorded obs
-            obs_to_use = self._open_loop_obs
-
         self._rnn_counter += 1
         action, self._rnn_hidden_state = self.nets["policy"](
-            obs_dict=obs_to_use,
+            obs_dict=obs_dict,
             goal_dict=goal_dict,
             rnn_init_state=self._rnn_hidden_state,
             return_state=True
@@ -643,8 +637,10 @@ class BC_Transformer(BC):
         """
         Creates networks and places them into @self.nets.
         """
+        self._set_params_from_config()
         assert self.algo_config.transformer.enabled
-        assert self.algo_config.transformer.context_length == self.global_config.train.frame_stack+1, "context_length should be same as frame_stack+1"
+        assert self.frame_stack+1 == self.seq_len, "must predict same number of actions as history"
+        assert self.context_length == self.frame_stack+1, "context_length should be same as frame_stack+1"
 
         self.nets = nn.ModuleDict()
         self.nets["policy"] = PolicyNets.TransformerActorNetwork(
@@ -654,7 +650,6 @@ class BC_Transformer(BC):
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
             **BaseNets.transformer_args_from_config(self.algo_config.transformer),
         )
-        self._set_params_from_config()
         self.nets = self.nets.float().to(self.device)
         
     def _set_params_from_config(self):
@@ -663,14 +658,20 @@ class BC_Transformer(BC):
         Called by @_create_networks method
         """
         self.context_length = self.algo_config.transformer.context_length
-        self.supervise_all_steps = self.algo_config.transformer.supervise_all_steps
 
     def prepare_inputs(self, obs_normalization_stats=None, **inputs):
-        inputs = super(BC_Transformer, self).prepare_inputs(obs_normalization_stats=obs_normalization_stats, **inputs)
-        if "actions" in inputs.keys():
-            if not self.supervise_all_steps:
-                inputs["actions"] = inputs["actions"][:, self.context_length-1, :]
-        return inputs
+        """
+        Batch has sequence (s_t-frame_stack, ..., s_t-1, s_t, s_t+1, .., s_t+seq_len-1).
+        We want to input (s_t-frame_stack, ..., s_t-1, s_t) and output (a_t, a_t+1, .., a_t+seq_len-1).
+        Modify the batch accordingly.
+        """
+        actions = None
+        if "actions" in inputs:
+            actions = TensorUtils.slice(x=inputs["actions"], dim=1, start=self.frame_stack, end=self.frame_stack+self.seq_len)
+        inputs["actions"] = None
+        inputs = TensorUtils.slice(x=inputs, dim=1, start=0, end=self.frame_stack+1)
+        inputs["actions"] = actions
+        return super(BC_Transformer, self).prepare_inputs(obs_normalization_stats=obs_normalization_stats, **inputs)
 
     def _forward_training(self, batch, epoch=None):
         """
@@ -694,9 +695,6 @@ class BC_Transformer(BC):
 
         predictions = OrderedDict()
         predictions["actions"] = self.nets["policy"](obs_dict=batch["obs"], actions=None, goal_dict=batch["goal"])
-        if not self.supervise_all_steps:
-            # only supervise final timestep
-            predictions["actions"] = predictions["actions"][:, -1, :]
         return predictions
 
     def get_action(self, obs_dict, goal_dict=None):

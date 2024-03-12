@@ -395,7 +395,7 @@ class RNN_Base(Module):
             else:
                 out = [input_shape[0]] + out
         else:
-            out = [input_shape[0], self._num_layers * self._hidden_dim]
+            out = [input_shape[0], self._hidden_dim]
         return out
 
     def forward(self, inputs, rnn_init_state=None, return_state=False):

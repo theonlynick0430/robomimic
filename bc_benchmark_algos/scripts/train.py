@@ -103,7 +103,11 @@ def train(args):
 
     ### ROLLOUT ENV ###
     assert config.train.dataset_type == "robomimic", "only robomimic envs currently supported"
-    rollout_env = RobomimicRolloutEnv(config=config, validset=validset)
+    rollout_env = RobomimicRolloutEnv.factory(
+        config=config, 
+        validset=validset, 
+        obs_group_to_keys=ObsUtils.OBS_GROUP_TO_KEYS,
+    )
 
     # print all warnings before training begins
     print("*" * 50)

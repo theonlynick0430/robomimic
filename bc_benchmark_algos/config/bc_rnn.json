@@ -158,7 +158,7 @@
             "block_output_dropout": 0.1,
             "sinusoidal_embedding": false,
             "activation": "gelu",
-            "supervise_all_steps": false,
+            "supervise_all_steps": true,
             "nn_parameter_for_timesteps": true
         }
     },

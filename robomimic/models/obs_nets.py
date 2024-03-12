@@ -750,15 +750,7 @@ class RNN_MIMO_MLP(Module):
                 corresponds to an observation group, and the low-level dictionaries
                 specify the shape for each modality in an observation dictionary
         """
-
-        # infers temporal dimension from input shape
-        obs_group = list(self.input_obs_group_shapes.keys())[0]
-        mod = list(self.input_obs_group_shapes[obs_group].keys())[0]
-        T = input_shape[obs_group][mod][0]
-        TensorUtils.assert_size_at_dim(input_shape, size=T, dim=0, 
-                msg="RNN_MIMO_MLP: input_shape inconsistent in temporal dimension")
-        # returns a dictionary instead of list since outputs are dictionaries
-        return { k : [T] + list(self.output_shapes[k]) for k in self.output_shapes }
+        return { k : list(self.output_shapes[k]) for k in self.output_shapes }
 
     def forward(self, rnn_init_state=None, return_state=False, **inputs):
         """

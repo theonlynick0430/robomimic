@@ -555,6 +555,7 @@ class RNNActorNetwork(RNN_MIMO_MLP):
         self,
         obs_shapes,
         ac_dim,
+        seq_len,
         mlp_layer_dims,
         rnn_hidden_dim,
         rnn_num_layers,
@@ -569,6 +570,8 @@ class RNNActorNetwork(RNN_MIMO_MLP):
                 expected shapes for observations.
 
             ac_dim (int): dimension of action space.
+
+            seq_len (int): dimension of output temporal space.
 
             mlp_layer_dims ([int]): sequence of integers for the MLP hidden layers sizes.
 
@@ -601,6 +604,7 @@ class RNNActorNetwork(RNN_MIMO_MLP):
                     ...
         """
         self.ac_dim = ac_dim
+        self.seq_len = seq_len
 
         assert isinstance(obs_shapes, OrderedDict)
         self.obs_shapes = obs_shapes
@@ -616,7 +620,7 @@ class RNNActorNetwork(RNN_MIMO_MLP):
             rnn_num_layers=rnn_num_layers,
             rnn_type=rnn_type,
             rnn_kwargs=rnn_kwargs,
-            per_step=True,
+            per_step=False,
             encoder_kwargs=encoder_kwargs,
         )
 
@@ -625,8 +629,11 @@ class RNNActorNetwork(RNN_MIMO_MLP):
         Allow subclasses to re-define outputs from @RNN_MIMO_MLP, since we won't
         always directly predict actions, but may instead predict the parameters
         of a action distribution.
+
+        Since we only predict actions from last hidden state, we must predict data
+        in shape of (seq_len, ac_dim).
         """
-        return OrderedDict(action=(self.ac_dim,))
+        return OrderedDict(action=(self.seq_len, self.ac_dim,))
 
     def output_shape(self, input_shape):
         # note: @input_shape should be dictionary (key: mod)
@@ -668,25 +675,6 @@ class RNNActorNetwork(RNN_MIMO_MLP):
             return actions, state
         else:
             return actions
-
-    def forward_step(self, obs_dict, goal_dict=None, rnn_state=None):
-        """
-        Unroll RNN over single timestep to get actions.
-
-        Args:
-            obs_dict (dict): batch of observations. Should not contain
-                time dimension.
-            goal_dict (dict): if not None, batch of goal observations
-            rnn_state: rnn hidden state, initialize to zero state if set to None
-
-        Returns:
-            actions (torch.Tensor): batch of actions - does not contain time dimension
-            state: updated rnn state
-        """
-        obs_dict = TensorUtils.to_sequence(obs_dict)
-        action, state = self.forward(
-            obs_dict, goal_dict, rnn_init_state=rnn_state, return_state=True)
-        return action[:, 0], state
 
     def _to_string(self):
         """Info to pretty print."""
@@ -1033,6 +1021,9 @@ class TransformerActorNetwork(MIMO_Transformer):
         Allow subclasses to re-define outputs from @MIMO_Transformer, since we won't
         always directly predict actions, but may instead predict the parameters
         of a action distribution.
+
+        Since we predict an action at each time, we must predict data in 
+        shape (ac_dim).
         """
         output_shapes = OrderedDict(action=(self.ac_dim,))
         return output_shapes
